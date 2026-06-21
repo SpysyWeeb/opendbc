@@ -171,8 +171,15 @@ class LongitudinalController:
 
     # If custom tuning is disabled, use upstream fixed values
     if not self.enabled:
-      jerk_limit = 3.0 if long_control_state == LongCtrlState.pid else 1.0
-      self.jerk_upper = jerk_limit
+      # Lead-reaction launch tune: raise the upper jerk on 'starting' so the SCC ramps
+      # out of the brake-hold faster off the line (was lumped into the gentle 1.0).
+      # 'stopping' stays 1.0 and jerk_lower stays 5.0, so braking/smooth-stops are unaffected.
+      if long_control_state == LongCtrlState.starting:
+        self.jerk_upper = 5.0
+      elif long_control_state == LongCtrlState.pid:
+        self.jerk_upper = 3.0
+      else:  # stopping
+        self.jerk_upper = 1.0
       self.jerk_lower = 5.0
       return
 
