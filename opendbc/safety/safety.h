@@ -334,6 +334,7 @@ void safety_tick(const safety_config *cfg) {
       if (lagging) {
         controls_allowed = false;
         mads_exit_controls(MADS_DISENGAGE_REASON_LAG);
+        aol_on_lag();
       }
 
       // enforce minimum frequency for safety-relevant messages
@@ -342,6 +343,7 @@ void safety_tick(const safety_config *cfg) {
         rx_checks_invalid = true;
         controls_allowed = false;
         mads_exit_controls(MADS_DISENGAGE_REASON_LAG);
+        aol_on_lag();
       }
     }
   }
@@ -386,6 +388,7 @@ static void stock_ecu_check(bool stock_ecu_detected) {
   // Update MADS state machine on every received CAN message
   mads_state_update(vehicle_moving, acc_main_on, controls_allowed,
                     brake_pressed || regen_braking, steering_disengage);
+  aol_update(acc_main_on, steering_disengage);
 }
 
 static void relay_malfunction_reset(void) {
@@ -473,6 +476,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   controls_allowed = false;
   controls_allowed_lateral = false;
   m_mads_state_init();
+  aol_init();
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
 
