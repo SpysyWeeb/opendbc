@@ -93,6 +93,9 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
         main_button = GET_BIT(msg, 34U);
       }
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
+
+      // AOL: cruise main button doubles as the AOL toggle on cars with no LFA button
+      main_button_press = main_button;
     }
 
     // AOL: LFA button for CANFD Hyundai
