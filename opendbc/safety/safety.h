@@ -381,7 +381,7 @@ static void stock_ecu_check(bool stock_ecu_detected) {
   if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && stock_ecu_detected) {
     relay_malfunction_set();
   }
-  // Update MADS state machine on every received CAN message
+  // Update AOL state on every received CAN message
   aol_update(acc_main_on, steering_disengage);
 }
 
