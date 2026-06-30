@@ -4,6 +4,8 @@
 
 // Defined globally in safety.h — AOL reads this to decide if the feature is enabled
 extern int alternative_experience;
+// Defined globally in safety.h — openpilot's own full-engagement permission flag
+extern bool controls_allowed;
 
 // Global definitions
 bool lateral_allowed = false;    // main steering permission flag read by lateral.h
@@ -32,6 +34,11 @@ static inline void aol_init(void) {
   aol_state.acc_main.previous     = false;
   aol_state.acc_main.rising_edge  = false;
   aol_state.acc_main.falling_edge = false;
+
+  aol_state.op_controls_allowed.current      = false;
+  aol_state.op_controls_allowed.previous     = false;
+  aol_state.op_controls_allowed.rising_edge  = false;
+  aol_state.op_controls_allowed.falling_edge = false;
 
   aol_state.steering_disengage.current      = false;
   aol_state.steering_disengage.previous     = false;
@@ -63,6 +70,10 @@ static inline void aol_on_lag(void) {
 //                                                     used as the AOL toggle on cars,
 //                                                     like the Palisade, with no LFA button)
 //   - Rising edge on acc_main                       (ACC system just armed)
+//   - Rising edge on controls_allowed                (openpilot just achieved full engagement;
+//                                                     ensures lateral keeps running under AOL if
+//                                                     openpilot later disengages without the user
+//                                                     ever having pressed the AOL toggle button)
 //
 // Deactivation (clears lateral_allowed):
 //   - Falling edge on acc_main   (ACC main turned off)
@@ -89,6 +100,11 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
   aol_state.acc_main.rising_edge  = aol_state.acc_main.current && !aol_state.acc_main.previous;
   aol_state.acc_main.falling_edge = !aol_state.acc_main.current && aol_state.acc_main.previous;
 
+  // --- Edge detection: openpilot's own controls_allowed (full engagement) ---
+  aol_state.op_controls_allowed.current      = controls_allowed;
+  aol_state.op_controls_allowed.rising_edge  = aol_state.op_controls_allowed.current && !aol_state.op_controls_allowed.previous;
+  aol_state.op_controls_allowed.falling_edge = !aol_state.op_controls_allowed.current && aol_state.op_controls_allowed.previous;
+
   // --- Edge detection: steering_disengage ---
   aol_state.steering_disengage.current      = steering_disengage;
   aol_state.steering_disengage.rising_edge  = aol_state.steering_disengage.current && !aol_state.steering_disengage.previous;
@@ -104,8 +120,9 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
   aol_state.main_button.rising_edge  = aol_state.main_button.pressed && !aol_state.main_button.last_pressed;
   aol_state.main_button.falling_edge = !aol_state.main_button.pressed && aol_state.main_button.last_pressed;
 
-  // --- Activation: LFA button pressed, cruise main button pressed, OR acc_main just armed ---
-  if (aol_state.lfa_button.rising_edge || aol_state.main_button.rising_edge || aol_state.acc_main.rising_edge) {
+  // --- Activation: LFA button, cruise main button, acc_main, or controls_allowed rising edge ---
+  if (aol_state.lfa_button.rising_edge || aol_state.main_button.rising_edge ||
+      aol_state.acc_main.rising_edge || aol_state.op_controls_allowed.rising_edge) {
     lateral_allowed = true;
   }
 
@@ -123,6 +140,7 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
 
   // Save current values as previous for next cycle
   aol_state.acc_main.previous           = aol_state.acc_main.current;
+  aol_state.op_controls_allowed.previous = aol_state.op_controls_allowed.current;
   aol_state.steering_disengage.previous = aol_state.steering_disengage.current;
   aol_state.lfa_button.last_pressed     = aol_state.lfa_button.pressed;
   aol_state.main_button.last_pressed    = aol_state.main_button.pressed;
