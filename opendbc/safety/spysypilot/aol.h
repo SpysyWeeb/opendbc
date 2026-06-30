@@ -6,8 +6,9 @@
 extern int alternative_experience;
 
 // Global definitions
-bool lateral_allowed = false;   // main steering permission flag read by lateral.h
-bool lfa_button_press = false;  // set by hyundai / hyundai_canfd rx_hook on LFA button press
+bool lateral_allowed = false;    // main steering permission flag read by lateral.h
+bool lfa_button_press = false;   // set by hyundai / hyundai_canfd rx_hook on LFA button press
+bool main_button_press = false;  // set by hyundai / hyundai_canfd rx_hook on cruise main button press
 AolState aol_state;
 
 // aol_init — reset all AOL state to off.
@@ -15,11 +16,17 @@ AolState aol_state;
 static inline void aol_init(void) {
   lateral_allowed = false;
   lfa_button_press = false;
+  main_button_press = false;
 
   aol_state.lfa_button.pressed      = false;
   aol_state.lfa_button.last_pressed = false;
   aol_state.lfa_button.rising_edge  = false;
   aol_state.lfa_button.falling_edge = false;
+
+  aol_state.main_button.pressed      = false;
+  aol_state.main_button.last_pressed = false;
+  aol_state.main_button.rising_edge  = false;
+  aol_state.main_button.falling_edge = false;
 
   aol_state.acc_main.current      = false;
   aol_state.acc_main.previous     = false;
@@ -52,6 +59,9 @@ static inline void aol_on_lag(void) {
 //
 // Activation (sets lateral_allowed = true):
 //   - Rising edge on the physical LFA/LKAS button  (lfa_button_press set by rx_hook)
+//   - Rising edge on the cruise main button         (main_button_press set by rx_hook;
+//                                                     used as the AOL toggle on cars,
+//                                                     like the Palisade, with no LFA button)
 //   - Rising edge on acc_main                       (ACC system just armed)
 //
 // Deactivation (clears lateral_allowed):
@@ -89,8 +99,13 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
   aol_state.lfa_button.rising_edge  = aol_state.lfa_button.pressed && !aol_state.lfa_button.last_pressed;
   aol_state.lfa_button.falling_edge = !aol_state.lfa_button.pressed && aol_state.lfa_button.last_pressed;
 
-  // --- Activation: LFA button pressed OR acc_main just armed ---
-  if (aol_state.lfa_button.rising_edge || aol_state.acc_main.rising_edge) {
+  // --- Edge detection: cruise main button (written by hyundai rx_hook each frame) ---
+  aol_state.main_button.pressed      = main_button_press;
+  aol_state.main_button.rising_edge  = aol_state.main_button.pressed && !aol_state.main_button.last_pressed;
+  aol_state.main_button.falling_edge = !aol_state.main_button.pressed && aol_state.main_button.last_pressed;
+
+  // --- Activation: LFA button pressed, cruise main button pressed, OR acc_main just armed ---
+  if (aol_state.lfa_button.rising_edge || aol_state.main_button.rising_edge || aol_state.acc_main.rising_edge) {
     lateral_allowed = true;
   }
 
@@ -110,4 +125,5 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
   aol_state.acc_main.previous           = aol_state.acc_main.current;
   aol_state.steering_disengage.previous = aol_state.steering_disengage.current;
   aol_state.lfa_button.last_pressed     = aol_state.lfa_button.pressed;
+  aol_state.main_button.last_pressed    = aol_state.main_button.pressed;
 }
