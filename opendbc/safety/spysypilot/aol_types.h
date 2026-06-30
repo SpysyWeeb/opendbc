@@ -32,6 +32,7 @@ typedef struct {
 // Full AOL state: all tracked signals and feature configuration
 typedef struct {
   AolButtonState lfa_button;         // Physical LFA/LKAS button on the steering wheel
+  AolButtonState main_button;        // Cruise main button (used as AOL toggle on cars with no LFA button)
   AolBoolState   acc_main;           // ACC main armed state
   AolBoolState   steering_disengage; // Car-reported steering disengage / fault flag
   bool           system_active;      // True when ALT_EXP_AOL_ENABLE is set
@@ -39,6 +40,7 @@ typedef struct {
 } AolState;
 
 // Globals defined in aol.h — declared here so other headers can reference them
-extern bool lateral_allowed;   // Main per-cycle steering permission flag read by lateral.h
-extern bool lfa_button_press;  // Set by hyundai / hyundai_canfd rx_hook on LFA button press
+extern bool lateral_allowed;    // Main per-cycle steering permission flag read by lateral.h
+extern bool lfa_button_press;   // Set by hyundai / hyundai_canfd rx_hook on LFA button press
+extern bool main_button_press;  // Set by hyundai / hyundai_canfd rx_hook on cruise main button press
 extern AolState aol_state;
