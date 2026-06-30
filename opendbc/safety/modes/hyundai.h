@@ -151,6 +151,11 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
     }
 
+    // AOL: LFA/LKAS button on steering wheel — address 0x391, bit 4
+    if (msg->addr == 0x391U) {
+      lfa_button_press = GET_BIT(msg, 4U);
+    }
+
     // gas press, different for EV, hybrid, and ICE models
     if ((msg->addr == 0x371U) && hyundai_ev_gas_signal) {
       gas_pressed = (((msg->data[4] & 0x7FU) << 1) | (msg->data[3] >> 7)) != 0U;
