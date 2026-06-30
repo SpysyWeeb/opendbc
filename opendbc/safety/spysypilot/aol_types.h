@@ -11,6 +11,7 @@ typedef enum {
   AOL_DISENGAGE_STEERING_FAULT,    // EPS / car reported a steering disengage
   AOL_DISENGAGE_LAG,               // Safety-critical message lag detected
   AOL_DISENGAGE_DISABLED,          // AOL feature disabled via alternative_experience
+  AOL_DISENGAGE_HEARTBEAT_MISMATCH,  // Python stopped confirming AOL is active via USB heartbeat
 } AolDisengageReason;
 
 // Track a boolean signal with per-cycle edge detection
@@ -45,3 +46,5 @@ extern bool lateral_allowed;    // Main per-cycle steering permission flag read 
 extern bool lfa_button_press;   // Set by hyundai / hyundai_canfd rx_hook on LFA button press
 extern bool main_button_press;  // Set by hyundai / hyundai_canfd rx_hook on cruise main button press
 extern AolState aol_state;
+extern bool heartbeat_engaged_aol;             // Set by USB heartbeat command (0xf3, param2) when Python confirms AOL is active
+extern uint32_t heartbeat_engaged_aol_mismatches; // count of cycles lateral_allowed and heartbeat_engaged_aol have disagreed

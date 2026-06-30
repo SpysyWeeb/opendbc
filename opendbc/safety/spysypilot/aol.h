@@ -12,6 +12,8 @@ bool lateral_allowed = false;    // main steering permission flag read by latera
 bool lfa_button_press = false;   // set by hyundai / hyundai_canfd rx_hook on LFA button press
 bool main_button_press = false;  // set by hyundai / hyundai_canfd rx_hook on cruise main button press
 AolState aol_state;
+bool heartbeat_engaged_aol = false;
+uint32_t heartbeat_engaged_aol_mismatches = 0U;
 
 // aol_init — reset all AOL state to off.
 // Called from set_safety_hooks() on every safety mode change.
@@ -19,6 +21,8 @@ static inline void aol_init(void) {
   lateral_allowed = false;
   lfa_button_press = false;
   main_button_press = false;
+  heartbeat_engaged_aol = false;
+  heartbeat_engaged_aol_mismatches = 0U;
 
   aol_state.lfa_button.pressed      = false;
   aol_state.lfa_button.last_pressed = false;
@@ -144,4 +148,22 @@ static inline void aol_update(bool acc_main, bool steering_disengage) {
   aol_state.steering_disengage.previous = aol_state.steering_disengage.current;
   aol_state.lfa_button.last_pressed     = aol_state.lfa_button.pressed;
   aol_state.main_button.last_pressed    = aol_state.main_button.pressed;
+}
+
+// aol_heartbeat_engaged_check — called once per heartbeat tick (~10Hz) from panda firmware's
+// main loop. If lateral_allowed is true but Python's heartbeat has stopped confirming AOL is
+// active for 3 consecutive checks, force-revoke lateral_allowed. This catches the case where
+// the Python AolDriver state machine and the panda's lateral_allowed flag have silently
+// diverged (e.g. Python crashed, or a bug causes Python to think AOL is off while panda still
+// thinks it's on).
+static inline void aol_heartbeat_engaged_check(void) {
+  if (lateral_allowed && !heartbeat_engaged_aol) {
+    heartbeat_engaged_aol_mismatches += 1U;
+    if (heartbeat_engaged_aol_mismatches >= 3U) {
+      lateral_allowed = false;
+      aol_state.last_disengage = AOL_DISENGAGE_HEARTBEAT_MISMATCH;
+    }
+  } else {
+    heartbeat_engaged_aol_mismatches = 0U;
+  }
 }
