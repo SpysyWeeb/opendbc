@@ -149,6 +149,9 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
       int cruise_button = msg->data[0] & 0x7U;
       bool main_button = GET_BIT(msg, 3U);
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
+
+      // AOL: cruise main button doubles as the AOL toggle on cars with no LFA button
+      main_button_press = main_button;
     }
 
     // AOL: LFA/LKAS button on steering wheel — address 0x391, bit 4
