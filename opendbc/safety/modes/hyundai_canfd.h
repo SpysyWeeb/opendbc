@@ -95,6 +95,13 @@ static void hyundai_canfd_rx_hook(const CANPacket_t *msg) {
       hyundai_common_cruise_buttons_check(cruise_button, main_button);
     }
 
+    // AOL: LFA button for CANFD Hyundai
+    // 0x1CF bit 23 (standard) or 0x1AA bit 39 (alt buttons)
+    const unsigned int lfa_msg = hyundai_canfd_alt_buttons ? 0x1aaU : 0x1cfU;
+    if (msg->addr == lfa_msg) {
+      lfa_button_press = (msg->addr == 0x1cfU) ? GET_BIT(msg, 23U) : GET_BIT(msg, 39U);
+    }
+
     // gas press, different for EV, hybrid, and ICE models
     if ((msg->addr == 0x35U) && hyundai_ev_gas_signal) {
       gas_pressed = msg->data[5] != 0U;
