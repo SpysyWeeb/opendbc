@@ -36,7 +36,7 @@ static inline void aol_init(void) {
 }
 
 // aol_on_lag — immediately revoke lateral permission when a safety-critical
-// message lags. Called from safety_tick() alongside mads_exit_controls().
+// message lags. Called from safety_tick() to clear lateral_allowed on OP crash.
 static inline void aol_on_lag(void) {
   if (lateral_allowed) {
     lateral_allowed = false;
