@@ -31,12 +31,13 @@ typedef struct {
 
 // Full AOL state: all tracked signals and feature configuration
 typedef struct {
-  AolButtonState lfa_button;         // Physical LFA/LKAS button on the steering wheel
-  AolButtonState main_button;        // Cruise main button (used as AOL toggle on cars with no LFA button)
-  AolBoolState   acc_main;           // ACC main armed state
-  AolBoolState   steering_disengage; // Car-reported steering disengage / fault flag
-  bool           system_active;      // True when ALT_EXP_AOL_ENABLE is set
-  AolDisengageReason last_disengage; // Most recent reason for deactivation
+  AolButtonState lfa_button;          // Physical LFA/LKAS button on the steering wheel
+  AolButtonState main_button;         // Cruise main button (used as AOL toggle on cars with no LFA button)
+  AolBoolState   acc_main;            // ACC main armed state
+  AolBoolState   op_controls_allowed; // openpilot's own controls_allowed (full engagement) state
+  AolBoolState   steering_disengage;  // Car-reported steering disengage / fault flag
+  bool           system_active;       // True when ALT_EXP_AOL_ENABLE is set
+  AolDisengageReason last_disengage;  // Most recent reason for deactivation
 } AolState;
 
 // Globals defined in aol.h — declared here so other headers can reference them
