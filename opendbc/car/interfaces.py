@@ -22,7 +22,7 @@ ButtonType = structs.CarState.ButtonEvent.Type
 
 V_CRUISE_MAX = 145
 MAX_CTRL_SPEED = (V_CRUISE_MAX + 4) * CV.KPH_TO_MS
-ACCEL_MAX = 2.0
+ACCEL_MAX = 4.0  # Spysypilot: doubled from 2.0 (owner request); panda safety limit raised to match
 ACCEL_MIN = -3.5
 
 TORQUE_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/params.toml')

@@ -21,7 +21,7 @@
 
 extern const LongitudinalLimits HYUNDAI_LONG_LIMITS;
 const LongitudinalLimits HYUNDAI_LONG_LIMITS = {
-  .max_accel = 200,   // 1/100 m/s2
+  .max_accel = 400,   // 1/100 m/s2 (Spysypilot: doubled from ISO-15622's 2.0 by owner request)
   .min_accel = -350,  // 1/100 m/s2
 };
 

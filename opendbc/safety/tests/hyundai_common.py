@@ -74,6 +74,8 @@ class HyundaiButtonBase:
 
 class HyundaiLongitudinalBase(common.LongitudinalAccelSafetyTest):
 
+  MAX_ACCEL = 4.0  # Spysypilot: matches the raised HYUNDAI_LONG_LIMITS
+
   DISABLED_ECU_UDS_MSG: tuple[int, int]
   DISABLED_ECU_ACTUATION_MSG: tuple[int, int]
 
