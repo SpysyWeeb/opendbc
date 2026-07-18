@@ -151,7 +151,16 @@ class CarController(CarControllerBase):
 
     if self.frame % 2 == 0 and self.CP.openpilotLongitudinalControl:
       # TODO: unclear if this is needed
-      jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
+      # Spysypilot: JerkUpperLimit gates the standstill exit -- at the stock 1.0 the car
+      # takes ~1.4s to physically deliver startAccel against brake bleed (field-measured,
+      # routes 5d/61: accCmd pinned while vEgo stays 0). 5.0 is the platform's own
+      # factory-launch floor; stopping/off keep the gentle 1.0 for brake feathering
+      if actuators.longControlState == LongCtrlState.pid:
+        jerk = 3.0
+      elif actuators.longControlState == LongCtrlState.starting:
+        jerk = 5.0
+      else:
+        jerk = 1.0
       use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
       can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
                                                       hud_control, set_speed_in_units, stopping,
