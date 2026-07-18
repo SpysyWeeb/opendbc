@@ -52,7 +52,8 @@ class CarControllerParams:
 
     # Default for most HKG
     else:
-      self.STEER_MAX = 384
+      self.STEER_MAX = 409  # Spysypilot BLaT: stock 384; +6.5% steering authority for
+                            # tighter curves before driver-torque fallback (Palisade)
 
 
 class HyundaiSafetyFlags(IntFlag):
