@@ -16,7 +16,7 @@ class CarControllerParams:
   ACCEL_MAX = 4.0 # m/s (Spysypilot: doubled with the safety firmware limit)
 
   def __init__(self, CP):
-    self.STEER_DELTA_UP = 3
+    self.STEER_DELTA_UP = 4  # Spysypilot BLaT: stock 3; faster torque build for 90-degree turns
     self.STEER_DELTA_DOWN = 7
     self.STEER_DRIVER_ALLOWANCE = 50
     self.STEER_DRIVER_MULTIPLIER = 2
