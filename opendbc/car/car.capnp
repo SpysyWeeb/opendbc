@@ -376,6 +376,30 @@ struct CarControl {
     torqueOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
 
+    # BLaT low-speed torque damping diagnostics. These are populated by
+    # Hyundai's CarController in actuatorsOutput and remain zero elsewhere.
+    torqueBeforeDamping @9: Float32;       # normalized, signed controller demand
+    torqueDampingRequested @10: Float32;   # normalized magnitude before sustain floor
+    torqueDampingApplied @11: Float32;     # normalized magnitude actually subtracted
+    torqueDampingState @12: TorqueDampingState;
+    torqueDampingVersion @13: UInt8;
+    signedSteeringRateDeg @14: Float32;
+    torqueDampingFloor @15: Float32;        # normalized magnitude
+    torqueBreakawayLatch @16: Float32;      # normalized magnitude
+
+    enum TorqueDampingState {
+      inactive @0;
+      driverOverride @1;
+      speedInactive @2;
+      requestDeadband @3;
+      epsDeadband @4;
+      wheelStationary @5;
+      requestEpsMismatch @6;
+      epsMotionMismatch @7;
+      damping @8;
+      sustainFloor @9;
+    }
+
     enum LongControlState @0xe40f3a917d908282{
       off @0;
       pid @1;
