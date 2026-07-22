@@ -1,6 +1,10 @@
+import math
+from enum import IntEnum
+
 import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, make_tester_present_msg, structs
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits, common_fault_avoidance
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
@@ -22,6 +26,212 @@ MAX_ANGLE_CONSECUTIVE_FRAMES = 2
 # and triggers the "SCC Conditions Not Met" alert. Delaying the button send lets factory SCC disengage
 # naturally on brake press. We send ~100 ms later if it fails to do so, or if we want to cancel for another reason.
 CANCEL_BUTTON_DELAY_FRAMES = 10
+
+# BLaT: reduce low-speed release jerk only after the EPS and wheel confirm that
+# the requested torque has broken static friction. Damping fades out from 12 to
+# 15 mph and is never allowed to hold torque above the controller's demand.
+TORQUE_DAMPING_VERSION = 1
+TORQUE_DAMPING_FULL_SPEED = 12.0 * CV.MPH_TO_MS
+TORQUE_DAMPING_ZERO_SPEED = 15.0 * CV.MPH_TO_MS
+TORQUE_DAMPING_GAIN = 0.002  # normalized torque per steering-wheel deg/s
+TORQUE_DAMPING_MAX = 0.20  # normalized torque
+TORQUE_DAMPING_SUSTAIN_FRACTION = 0.90
+TORQUE_DAMPING_RATE_FILTER_TAU = 0.08
+TORQUE_DAMPING_REQUEST_SIGN_ENTER = 8  # CAN torque counts
+TORQUE_DAMPING_REQUEST_SIGN_EXIT = 4
+TORQUE_DAMPING_EPS_SIGN_ENTER = 1.0  # CR_Mdps_OutTq native units
+TORQUE_DAMPING_EPS_SIGN_EXIT = 0.5
+TORQUE_DAMPING_RATE_SIGN_ENTER = 12.0  # steering-wheel deg/s
+TORQUE_DAMPING_RATE_SIGN_EXIT = 6.0
+TORQUE_DAMPING_ANGLE_DELTA_DEADBAND = 0.05  # steering-wheel degrees per control frame
+TORQUE_DAMPING_LATCH_HOLD_FRAMES = int(0.5 / DT_CTRL)
+
+
+class TorqueDampingState(IntEnum):
+  INACTIVE = 0
+  DRIVER_OVERRIDE = 1
+  SPEED_INACTIVE = 2
+  REQUEST_DEADBAND = 3
+  EPS_DEADBAND = 4
+  WHEEL_STATIONARY = 5
+  REQUEST_EPS_MISMATCH = 6
+  EPS_MOTION_MISMATCH = 7
+  DAMPING = 8
+  SUSTAIN_FLOOR = 9
+
+
+class SignedHysteresis:
+  """Stable sign detection with separate enter and exit thresholds."""
+
+  def __init__(self, enter: float, exit_threshold: float):
+    assert 0 <= exit_threshold < enter
+    self.enter = enter
+    self.exit = exit_threshold
+    self.sign = 0
+
+  def reset(self) -> None:
+    self.sign = 0
+
+  def update(self, value: float) -> int:
+    if self.sign > 0:
+      if value <= -self.enter:
+        self.sign = -1
+      elif value < self.exit:
+        self.sign = 0
+    elif self.sign < 0:
+      if value >= self.enter:
+        self.sign = 1
+      elif value > -self.exit:
+        self.sign = 0
+    elif value >= self.enter:
+      self.sign = 1
+    elif value <= -self.enter:
+      self.sign = -1
+    return self.sign
+
+
+class HyundaiLowSpeedTorqueDamping:
+  """EPS-gated damping with an adaptive floor that only caps damping subtraction."""
+
+  def __init__(self, steer_max: int):
+    self.steer_max = steer_max
+    self.request_sign = SignedHysteresis(TORQUE_DAMPING_REQUEST_SIGN_ENTER, TORQUE_DAMPING_REQUEST_SIGN_EXIT)
+    self.eps_sign = SignedHysteresis(TORQUE_DAMPING_EPS_SIGN_ENTER, TORQUE_DAMPING_EPS_SIGN_EXIT)
+    self.motion_sign = SignedHysteresis(TORQUE_DAMPING_RATE_SIGN_ENTER, TORQUE_DAMPING_RATE_SIGN_EXIT)
+    self.rate_filter = FirstOrderFilter(0.0, TORQUE_DAMPING_RATE_FILTER_TAU, DT_CTRL)
+    self.previous_angle: float | None = None
+    self.angle_direction = 0
+    self.was_moving = False
+    self.stationary_frames = 0
+    self.latch_direction = 0
+    self.breakaway_latch = 0.0
+
+    self.state = TorqueDampingState.INACTIVE
+    self.signed_steering_rate = 0.0
+    self.damping_requested = 0.0
+    self.damping_applied = 0.0
+    self.sustain_floor = 0.0
+
+  def _clear_latch(self) -> None:
+    self.stationary_frames = 0
+    self.latch_direction = 0
+    self.breakaway_latch = 0.0
+
+  def _reset(self, steering_angle: float) -> None:
+    self.request_sign.reset()
+    self.eps_sign.reset()
+    self.motion_sign.reset()
+    self.rate_filter.x = 0.0
+    self.signed_steering_rate = 0.0
+    self.previous_angle = steering_angle
+    self.angle_direction = 0
+    self.was_moving = False
+    self._clear_latch()
+
+  def _update_signed_rate(self, steering_angle: float, steering_rate: float) -> float:
+    if self.previous_angle is None:
+      self.previous_angle = steering_angle
+      return 0.0
+
+    angle_delta = steering_angle - self.previous_angle
+    self.previous_angle = steering_angle
+    if angle_delta >= TORQUE_DAMPING_ANGLE_DELTA_DEADBAND:
+      self.angle_direction = 1
+    elif angle_delta <= -TORQUE_DAMPING_ANGLE_DELTA_DEADBAND:
+      self.angle_direction = -1
+
+    if self.angle_direction == 0:
+      raw_rate = 0.0
+    elif abs(steering_rate) > 1e-3:
+      # CR_Mdps_WHLSpd is unsigned on affected Hyundai platforms.
+      raw_rate = self.angle_direction * abs(steering_rate)
+    else:
+      raw_rate = angle_delta / DT_CTRL
+    self.signed_steering_rate = float(self.rate_filter.update(raw_rate))
+    return self.signed_steering_rate
+
+  @staticmethod
+  def _speed_scale(v_ego: float) -> float:
+    fraction = float(np.clip((v_ego - TORQUE_DAMPING_FULL_SPEED) / (TORQUE_DAMPING_ZERO_SPEED - TORQUE_DAMPING_FULL_SPEED), 0.0, 1.0))
+    return 1.0 - fraction * fraction * (3.0 - 2.0 * fraction)
+
+  def update(
+    self, demand: int, applied_last: int, eps_torque: float, steering_angle: float, steering_rate: float, v_ego: float, lat_active: bool, steering_pressed: bool
+  ) -> int:
+    self.damping_requested = 0.0
+    self.damping_applied = 0.0
+    self.sustain_floor = 0.0
+
+    if not lat_active:
+      self._reset(steering_angle)
+      self.state = TorqueDampingState.INACTIVE
+      return demand
+    if steering_pressed:
+      self._reset(steering_angle)
+      self.state = TorqueDampingState.DRIVER_OVERRIDE
+      return demand
+    if v_ego >= TORQUE_DAMPING_ZERO_SPEED:
+      self._reset(steering_angle)
+      self.state = TorqueDampingState.SPEED_INACTIVE
+      return demand
+
+    signed_rate = self._update_signed_rate(steering_angle, steering_rate)
+    request_sign = self.request_sign.update(demand)
+    eps_sign = self.eps_sign.update(eps_torque)
+    motion_sign = self.motion_sign.update(signed_rate)
+
+    if self.latch_direction != 0 and request_sign != 0 and request_sign != self.latch_direction:
+      self._clear_latch()
+
+    motion_started = motion_sign != 0 and not self.was_moving
+    self.was_moving = motion_sign != 0
+    if motion_sign == 0:
+      self.stationary_frames += 1
+      if self.stationary_frames >= TORQUE_DAMPING_LATCH_HOLD_FRAMES:
+        self._clear_latch()
+    else:
+      self.stationary_frames = 0
+      if self.latch_direction != 0 and motion_sign != self.latch_direction:
+        self._clear_latch()
+
+    if request_sign == 0:
+      self._clear_latch()
+      self.state = TorqueDampingState.REQUEST_DEADBAND
+      return demand
+    if eps_sign == 0:
+      self.state = TorqueDampingState.EPS_DEADBAND
+      return demand
+    if motion_sign == 0:
+      self.state = TorqueDampingState.WHEEL_STATIONARY
+      return demand
+
+    if request_sign != eps_sign:
+      self.state = TorqueDampingState.REQUEST_EPS_MISMATCH
+      return demand
+    if eps_sign != motion_sign:
+      self.state = TorqueDampingState.EPS_MOTION_MISMATCH
+      return demand
+
+    if self.latch_direction != motion_sign:
+      self.latch_direction = motion_sign
+      self.breakaway_latch = abs(applied_last)
+    elif motion_started:
+      # Keep a conservative latch through a brief re-stick/release cycle.
+      self.breakaway_latch = max(self.breakaway_latch, abs(applied_last))
+
+    speed_scale = self._speed_scale(v_ego)
+    self.damping_requested = min(abs(signed_rate) * TORQUE_DAMPING_GAIN * self.steer_max * speed_scale, TORQUE_DAMPING_MAX * self.steer_max)
+    demand_magnitude = abs(demand)
+    damped_magnitude = max(demand_magnitude - self.damping_requested, 0.0)
+    self.sustain_floor = TORQUE_DAMPING_SUSTAIN_FRACTION * self.breakaway_latch
+
+    # The floor protects only against our subtraction. It must never hold the
+    # target above the undamped controller demand during overshoot correction.
+    target_magnitude = min(demand_magnitude, max(damped_magnitude, self.sustain_floor))
+    target = int(round(math.copysign(target_magnitude, demand)))
+    self.damping_applied = max(demand_magnitude - abs(target), 0.0)
+    self.state = TorqueDampingState.SUSTAIN_FLOOR if target_magnitude > damped_magnitude else TorqueDampingState.DAMPING
+    return target
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
@@ -58,6 +268,7 @@ class CarController(CarControllerBase):
 
     self.accel_last = 0
     self.apply_torque_last = 0
+    self.low_speed_torque_damping = HyundaiLowSpeedTorqueDamping(self.params.STEER_MAX)
     self.car_fingerprint = CP.carFingerprint
     self.last_button_frame = 0
     self.cancel_counter = 0
@@ -68,7 +279,17 @@ class CarController(CarControllerBase):
 
     # steering torque
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
-    apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
+    damping_target = self.low_speed_torque_damping.update(
+      new_torque,
+      self.apply_torque_last,
+      CS.out.steeringTorqueEps,
+      CS.out.steeringAngleDeg,
+      CS.out.steeringRateDeg,
+      CS.out.vEgo,
+      CC.latActive,
+      CS.out.steeringPressed,
+    )
+    apply_torque = apply_driver_steer_torque_limits(damping_target, self.apply_torque_last, CS.out.steeringTorque, self.params)
 
     # >90 degree steering fault prevention
     self.angle_limit_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringAngleDeg) >= MAX_ANGLE, CC.latActive,
@@ -120,6 +341,14 @@ class CarController(CarControllerBase):
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / self.params.STEER_MAX
     new_actuators.torqueOutputCan = apply_torque
+    new_actuators.torqueBeforeDamping = new_torque / self.params.STEER_MAX
+    new_actuators.torqueDampingRequested = self.low_speed_torque_damping.damping_requested / self.params.STEER_MAX
+    new_actuators.torqueDampingApplied = self.low_speed_torque_damping.damping_applied / self.params.STEER_MAX
+    new_actuators.torqueDampingState = int(self.low_speed_torque_damping.state)
+    new_actuators.torqueDampingVersion = TORQUE_DAMPING_VERSION
+    new_actuators.signedSteeringRateDeg = self.low_speed_torque_damping.signed_steering_rate
+    new_actuators.torqueDampingFloor = self.low_speed_torque_damping.sustain_floor / self.params.STEER_MAX
+    new_actuators.torqueBreakawayLatch = self.low_speed_torque_damping.breakaway_latch / self.params.STEER_MAX
     new_actuators.accel = accel
 
     self.frame += 1
