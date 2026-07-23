@@ -30,7 +30,7 @@ CANCEL_BUTTON_DELAY_FRAMES = 10
 # BLaT: reduce low-speed release jerk only after the EPS and wheel confirm that
 # the requested torque has broken static friction. Damping fades out from 12 to
 # 15 mph and is never allowed to hold torque above the controller's demand.
-TORQUE_DAMPING_VERSION = 1
+TORQUE_DAMPING_VERSION = 2
 TORQUE_DAMPING_FULL_SPEED = 12.0 * CV.MPH_TO_MS
 TORQUE_DAMPING_ZERO_SPEED = 15.0 * CV.MPH_TO_MS
 TORQUE_DAMPING_GAIN = 0.002  # normalized torque per steering-wheel deg/s
@@ -58,6 +58,7 @@ class TorqueDampingState(IntEnum):
   EPS_MOTION_MISMATCH = 7
   DAMPING = 8
   SUSTAIN_FLOOR = 9
+  TURN_IN_AUTHORITY = 10
 
 
 class SignedHysteresis:
@@ -156,7 +157,8 @@ class HyundaiLowSpeedTorqueDamping:
     return 1.0 - fraction * fraction * (3.0 - 2.0 * fraction)
 
   def update(
-    self, demand: int, applied_last: int, eps_torque: float, steering_angle: float, steering_rate: float, v_ego: float, lat_active: bool, steering_pressed: bool
+    self, demand: int, applied_last: int, eps_torque: float, steering_angle: float, steering_rate: float, v_ego: float, lat_active: bool,
+    steering_pressed: bool, damping_blocked: bool = False,
   ) -> int:
     self.damping_requested = 0.0
     self.damping_applied = 0.0
@@ -173,6 +175,10 @@ class HyundaiLowSpeedTorqueDamping:
     if v_ego >= TORQUE_DAMPING_ZERO_SPEED:
       self._reset(steering_angle)
       self.state = TorqueDampingState.SPEED_INACTIVE
+      return demand
+    if damping_blocked:
+      self._reset(steering_angle)
+      self.state = TorqueDampingState.TURN_IN_AUTHORITY
       return demand
 
     signed_rate = self._update_signed_rate(steering_angle, steering_rate)
@@ -288,6 +294,7 @@ class CarController(CarControllerBase):
       CS.out.vEgo,
       CC.latActive,
       CS.out.steeringPressed,
+      actuators.torqueDampingBlocked,
     )
     apply_torque = apply_driver_steer_torque_limits(damping_target, self.apply_torque_last, CS.out.steeringTorque, self.params)
 

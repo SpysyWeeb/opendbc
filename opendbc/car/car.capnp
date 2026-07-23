@@ -387,6 +387,7 @@ struct CarControl {
     signedSteeringRateDeg @14: Float32;
     torqueDampingFloor @15: Float32;        # normalized magnitude
     torqueBreakawayLatch @16: Float32;      # normalized magnitude
+    torqueDampingBlocked @17: Bool;         # future path requires under-tracked turn-in authority
 
     enum TorqueDampingState {
       inactive @0;
@@ -399,6 +400,7 @@ struct CarControl {
       epsMotionMismatch @7;
       damping @8;
       sustainFloor @9;
+      turnInAuthority @10;
     }
 
     enum LongControlState @0xe40f3a917d908282{

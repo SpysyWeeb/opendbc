@@ -14,8 +14,9 @@ from opendbc.car.hyundai.carcontroller import (
 STEER_MAX = 409
 
 
-def update(damping, demand=300, applied_last=200, eps_torque=8.0, steering_angle=1.0, steering_rate=500.0, speed=5.0, lat_active=True, steering_pressed=False):
-  return damping.update(demand, applied_last, eps_torque, steering_angle, steering_rate, speed, lat_active, steering_pressed)
+def update(damping, demand=300, applied_last=200, eps_torque=8.0, steering_angle=1.0, steering_rate=500.0, speed=5.0, lat_active=True,
+           steering_pressed=False, damping_blocked=False):
+  return damping.update(demand, applied_last, eps_torque, steering_angle, steering_rate, speed, lat_active, steering_pressed, damping_blocked)
 
 
 class TestSignedHysteresis:
@@ -122,6 +123,14 @@ class TestHyundaiLowSpeedTorqueDamping:
     assert self.damping.breakaway_latch == 0.0
     assert self.damping.signed_steering_rate == 0.0
 
+  def test_undertracked_turn_in_guard_preserves_full_demand(self):
+    update(self.damping)
+    assert self.damping.breakaway_latch > 0
+    assert update(self.damping, steering_angle=2.0, damping_blocked=True) == 300
+    assert self.damping.state == TorqueDampingState.TURN_IN_AUTHORITY
+    assert self.damping.damping_applied == 0.0
+    assert self.damping.breakaway_latch == 0.0
+
   def test_brief_stall_keeps_and_updates_latch(self):
     update(self.damping, applied_last=200)
     assert self.damping.breakaway_latch == 200
@@ -139,8 +148,10 @@ class TestHyundaiLowSpeedTorqueDamping:
   def test_diagnostic_schema_exposes_named_gate_state(self):
     actuators = CarControl.Actuators.new_message()
     actuators.torqueDampingState = int(TorqueDampingState.SUSTAIN_FLOOR)
-    actuators.torqueDampingVersion = 1
+    actuators.torqueDampingVersion = 2
+    actuators.torqueDampingBlocked = True
     actuators.signedSteeringRateDeg = -42.0
     assert str(actuators.torqueDampingState) == "sustainFloor"
-    assert actuators.torqueDampingVersion == 1
+    assert actuators.torqueDampingVersion == 2
+    assert actuators.torqueDampingBlocked
     assert actuators.signedSteeringRateDeg == -42.0
