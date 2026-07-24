@@ -30,7 +30,7 @@ CANCEL_BUTTON_DELAY_FRAMES = 10
 # BLaT: reduce low-speed release jerk only after the EPS and wheel confirm that
 # the requested torque has broken static friction. Damping fades out from 12 to
 # 15 mph and is never allowed to hold torque above the controller's demand.
-TORQUE_DAMPING_VERSION = 2
+TORQUE_DAMPING_VERSION = 3
 TORQUE_DAMPING_FULL_SPEED = 12.0 * CV.MPH_TO_MS
 TORQUE_DAMPING_ZERO_SPEED = 15.0 * CV.MPH_TO_MS
 TORQUE_DAMPING_GAIN = 0.002  # normalized torque per steering-wheel deg/s
@@ -45,6 +45,15 @@ TORQUE_DAMPING_RATE_SIGN_ENTER = 12.0  # steering-wheel deg/s
 TORQUE_DAMPING_RATE_SIGN_EXIT = 6.0
 TORQUE_DAMPING_ANGLE_DELTA_DEADBAND = 0.05  # steering-wheel degrees per control frame
 TORQUE_DAMPING_LATCH_HOLD_FRAMES = int(0.5 / DT_CTRL)
+# A blocked turn-in must retain full authority until the rack actually moves.
+# Once a meaningful stationary interval ends in a fast, directionally aligned
+# release, a short damping window prevents the stored EPS torque from carrying
+# the wheel through the path. This observes breakaway; it never helps create it.
+TORQUE_BREAKAWAY_STALL_FRAMES = int(0.15 / DT_CTRL)
+TORQUE_BREAKAWAY_ARM_HOLD_FRAMES = int(0.25 / DT_CTRL)
+TORQUE_BREAKAWAY_RELIEF_FRAMES = int(0.30 / DT_CTRL)
+TORQUE_BREAKAWAY_APPLIED_MIN = 0.25  # normalized torque
+TORQUE_BREAKAWAY_RATE_MIN = 30.0  # steering-wheel deg/s
 
 
 class TorqueDampingState(IntEnum):
@@ -59,6 +68,7 @@ class TorqueDampingState(IntEnum):
   DAMPING = 8
   SUSTAIN_FLOOR = 9
   TURN_IN_AUTHORITY = 10
+  BREAKAWAY_RELIEF = 11
 
 
 class SignedHysteresis:
@@ -106,17 +116,31 @@ class HyundaiLowSpeedTorqueDamping:
     self.stationary_frames = 0
     self.latch_direction = 0
     self.breakaway_latch = 0.0
+    self.breakaway_stall_frames = 0
+    self.breakaway_arm_frames = 0
+    self.breakaway_direction = 0
+    self.breakaway_stall_latch = 0.0
+    self.breakaway_relief_frames = 0
 
     self.state = TorqueDampingState.INACTIVE
     self.signed_steering_rate = 0.0
     self.damping_requested = 0.0
     self.damping_applied = 0.0
     self.sustain_floor = 0.0
+    self.breakaway_active = False
 
   def _clear_latch(self) -> None:
     self.stationary_frames = 0
     self.latch_direction = 0
     self.breakaway_latch = 0.0
+
+  def _clear_breakaway(self) -> None:
+    self.breakaway_stall_frames = 0
+    self.breakaway_arm_frames = 0
+    self.breakaway_direction = 0
+    self.breakaway_stall_latch = 0.0
+    self.breakaway_relief_frames = 0
+    self.breakaway_active = False
 
   def _reset(self, steering_angle: float) -> None:
     self.request_sign.reset()
@@ -128,6 +152,7 @@ class HyundaiLowSpeedTorqueDamping:
     self.angle_direction = 0
     self.was_moving = False
     self._clear_latch()
+    self._clear_breakaway()
 
   def _update_signed_rate(self, steering_angle: float, steering_rate: float) -> float:
     if self.previous_angle is None:
@@ -156,6 +181,76 @@ class HyundaiLowSpeedTorqueDamping:
     fraction = float(np.clip((v_ego - TORQUE_DAMPING_FULL_SPEED) / (TORQUE_DAMPING_ZERO_SPEED - TORQUE_DAMPING_FULL_SPEED), 0.0, 1.0))
     return 1.0 - fraction * fraction * (3.0 - 2.0 * fraction)
 
+  def _update_breakaway_observer(
+    self, request_sign: int, eps_sign: int, motion_sign: int, signed_rate: float, applied_last: int, damping_blocked: bool,
+  ) -> None:
+    """Arm only on a torque-loaded blocked stall, then recognize its release."""
+    aligned_request = request_sign != 0 and request_sign == eps_sign
+    loaded = abs(applied_last) >= TORQUE_BREAKAWAY_APPLIED_MIN * self.steer_max
+
+    if not damping_blocked or not aligned_request:
+      self._clear_breakaway()
+      return
+
+    if self.breakaway_direction != 0 and request_sign != self.breakaway_direction:
+      self._clear_breakaway()
+
+    if motion_sign == 0 and abs(signed_rate) < TORQUE_DAMPING_RATE_SIGN_EXIT:
+      if loaded:
+        if self.breakaway_direction in (0, request_sign):
+          self.breakaway_direction = request_sign
+          self.breakaway_stall_frames += 1
+          self.breakaway_stall_latch = max(self.breakaway_stall_latch, abs(applied_last))
+          if self.breakaway_stall_frames >= TORQUE_BREAKAWAY_STALL_FRAMES:
+            self.breakaway_arm_frames = TORQUE_BREAKAWAY_ARM_HOLD_FRAMES
+      elif self.breakaway_relief_frames == 0:
+        self._clear_breakaway()
+      return
+
+    if self.breakaway_relief_frames > 0:
+      if motion_sign == self.breakaway_direction:
+        self.breakaway_relief_frames -= 1
+        self.breakaway_active = True
+      else:
+        self._clear_breakaway()
+      return
+
+    if self.breakaway_arm_frames > 0:
+      if motion_sign == self.breakaway_direction and abs(signed_rate) >= TORQUE_BREAKAWAY_RATE_MIN:
+        self.breakaway_relief_frames = TORQUE_BREAKAWAY_RELIEF_FRAMES
+        self.breakaway_arm_frames = 0
+        self.breakaway_latch = max(self.breakaway_latch, self.breakaway_stall_latch, abs(applied_last))
+        self.latch_direction = motion_sign
+        self.breakaway_active = True
+      elif motion_sign not in (0, self.breakaway_direction):
+        self._clear_breakaway()
+      else:
+        self.breakaway_arm_frames -= 1
+    else:
+      self._clear_breakaway()
+
+  def _apply_damping(self, demand: int, applied_last: int, signed_rate: float, v_ego: float, state: TorqueDampingState | None = None) -> int:
+    motion_sign = self.motion_sign.sign
+    if self.latch_direction != motion_sign:
+      self.latch_direction = motion_sign
+      self.breakaway_latch = abs(applied_last)
+
+    speed_scale = self._speed_scale(v_ego)
+    self.damping_requested = min(abs(signed_rate) * TORQUE_DAMPING_GAIN * self.steer_max * speed_scale, TORQUE_DAMPING_MAX * self.steer_max)
+    demand_magnitude = abs(demand)
+    damped_magnitude = max(demand_magnitude - self.damping_requested, 0.0)
+    self.sustain_floor = TORQUE_DAMPING_SUSTAIN_FRACTION * self.breakaway_latch
+
+    # The floor protects only against our subtraction. It must never hold the
+    # target above the undamped controller demand during overshoot correction.
+    target_magnitude = min(demand_magnitude, max(damped_magnitude, self.sustain_floor))
+    target = int(round(math.copysign(target_magnitude, demand)))
+    self.damping_applied = max(demand_magnitude - abs(target), 0.0)
+    self.state = state if state is not None else (
+      TorqueDampingState.SUSTAIN_FLOOR if target_magnitude > damped_magnitude else TorqueDampingState.DAMPING
+    )
+    return target
+
   def update(
     self, demand: int, applied_last: int, eps_torque: float, steering_angle: float, steering_rate: float, v_ego: float, lat_active: bool,
     steering_pressed: bool, damping_blocked: bool = False,
@@ -163,6 +258,7 @@ class HyundaiLowSpeedTorqueDamping:
     self.damping_requested = 0.0
     self.damping_applied = 0.0
     self.sustain_floor = 0.0
+    self.breakaway_active = False
 
     if not lat_active:
       self._reset(steering_angle)
@@ -176,18 +272,19 @@ class HyundaiLowSpeedTorqueDamping:
       self._reset(steering_angle)
       self.state = TorqueDampingState.SPEED_INACTIVE
       return demand
-    if damping_blocked:
-      self._reset(steering_angle)
-      self.state = TorqueDampingState.TURN_IN_AUTHORITY
-      return demand
-
     signed_rate = self._update_signed_rate(steering_angle, steering_rate)
     request_sign = self.request_sign.update(demand)
     eps_sign = self.eps_sign.update(eps_torque)
     motion_sign = self.motion_sign.update(signed_rate)
+    self._update_breakaway_observer(request_sign, eps_sign, motion_sign, signed_rate, applied_last, damping_blocked)
 
-    if self.latch_direction != 0 and request_sign != 0 and request_sign != self.latch_direction:
+    if damping_blocked:
+      if self.breakaway_active and request_sign == eps_sign == motion_sign:
+        return self._apply_damping(demand, applied_last, signed_rate, v_ego, TorqueDampingState.BREAKAWAY_RELIEF)
       self._clear_latch()
+      self.was_moving = motion_sign != 0
+      self.state = TorqueDampingState.TURN_IN_AUTHORITY
+      return demand
 
     motion_started = motion_sign != 0 and not self.was_moving
     self.was_moving = motion_sign != 0
@@ -199,6 +296,12 @@ class HyundaiLowSpeedTorqueDamping:
       self.stationary_frames = 0
       if self.latch_direction != 0 and motion_sign != self.latch_direction:
         self._clear_latch()
+      elif motion_started and self.latch_direction == motion_sign:
+        # Keep a conservative latch through a brief re-stick/release cycle.
+        self.breakaway_latch = max(self.breakaway_latch, abs(applied_last))
+
+    if self.latch_direction != 0 and request_sign != 0 and request_sign != self.latch_direction:
+      self._clear_latch()
 
     if request_sign == 0:
       self._clear_latch()
@@ -218,26 +321,7 @@ class HyundaiLowSpeedTorqueDamping:
       self.state = TorqueDampingState.EPS_MOTION_MISMATCH
       return demand
 
-    if self.latch_direction != motion_sign:
-      self.latch_direction = motion_sign
-      self.breakaway_latch = abs(applied_last)
-    elif motion_started:
-      # Keep a conservative latch through a brief re-stick/release cycle.
-      self.breakaway_latch = max(self.breakaway_latch, abs(applied_last))
-
-    speed_scale = self._speed_scale(v_ego)
-    self.damping_requested = min(abs(signed_rate) * TORQUE_DAMPING_GAIN * self.steer_max * speed_scale, TORQUE_DAMPING_MAX * self.steer_max)
-    demand_magnitude = abs(demand)
-    damped_magnitude = max(demand_magnitude - self.damping_requested, 0.0)
-    self.sustain_floor = TORQUE_DAMPING_SUSTAIN_FRACTION * self.breakaway_latch
-
-    # The floor protects only against our subtraction. It must never hold the
-    # target above the undamped controller demand during overshoot correction.
-    target_magnitude = min(demand_magnitude, max(damped_magnitude, self.sustain_floor))
-    target = int(round(math.copysign(target_magnitude, demand)))
-    self.damping_applied = max(demand_magnitude - abs(target), 0.0)
-    self.state = TorqueDampingState.SUSTAIN_FLOOR if target_magnitude > damped_magnitude else TorqueDampingState.DAMPING
-    return target
+    return self._apply_damping(demand, applied_last, signed_rate, v_ego)
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
@@ -356,6 +440,9 @@ class CarController(CarControllerBase):
     new_actuators.signedSteeringRateDeg = self.low_speed_torque_damping.signed_steering_rate
     new_actuators.torqueDampingFloor = self.low_speed_torque_damping.sustain_floor / self.params.STEER_MAX
     new_actuators.torqueBreakawayLatch = self.low_speed_torque_damping.breakaway_latch / self.params.STEER_MAX
+    new_actuators.torqueBreakawayActive = self.low_speed_torque_damping.breakaway_active
+    new_actuators.torqueBreakawayStallS = self.low_speed_torque_damping.breakaway_stall_frames * DT_CTRL
+    new_actuators.torqueBreakawayReliefS = self.low_speed_torque_damping.breakaway_relief_frames * DT_CTRL
     new_actuators.accel = accel
 
     self.frame += 1
