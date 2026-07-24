@@ -388,6 +388,9 @@ struct CarControl {
     torqueDampingFloor @15: Float32;        # normalized magnitude
     torqueBreakawayLatch @16: Float32;      # normalized magnitude
     torqueDampingBlocked @17: Bool;         # future path requires under-tracked turn-in authority
+    torqueBreakawayActive @18: Bool;         # confirmed loaded stall released while turn-in damping was blocked
+    torqueBreakawayStallS @19: Float32;      # stationary duration observed before release
+    torqueBreakawayReliefS @20: Float32;     # remaining bounded post-release damping window
 
     enum TorqueDampingState {
       inactive @0;
@@ -401,6 +404,7 @@ struct CarControl {
       damping @8;
       sustainFloor @9;
       turnInAuthority @10;
+      breakawayRelief @11;
     }
 
     enum LongControlState @0xe40f3a917d908282{
