@@ -12,8 +12,8 @@ Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
-  ACCEL_MIN = -3.5 # m/s
-  ACCEL_MAX = 4.0 # m/s (Spysypilot: doubled with the safety firmware limit)
+  ACCEL_MIN = -3.5 # m/s^2
+  ACCEL_MAX = 4.0 # m/s^2 (Spysypilot: doubled with the safety firmware limit)
 
   def __init__(self, CP):
     self.STEER_DELTA_UP = 4  # Spysypilot BLaT: stock 3; faster torque build for 90-degree turns
