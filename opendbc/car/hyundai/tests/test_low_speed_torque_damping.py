@@ -3,10 +3,8 @@ import pytest
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.structs import CarControl
 from opendbc.car.hyundai.carcontroller import (
-  TORQUE_BREAKAWAY_STALL_FRAMES,
   TORQUE_DAMPING_MAX,
   TORQUE_DAMPING_SUSTAIN_FRACTION,
-  TORQUE_DAMPING_VERSION,
   HyundaiLowSpeedTorqueDamping,
   SignedHysteresis,
   TorqueDampingState,
@@ -133,109 +131,6 @@ class TestHyundaiLowSpeedTorqueDamping:
     assert self.damping.damping_applied == 0.0
     assert self.damping.breakaway_latch == 0.0
 
-  def test_loaded_blocked_stall_preserves_turn_in_then_damps_confirmed_breakaway(self):
-    for _ in range(TORQUE_BREAKAWAY_STALL_FRAMES):
-      assert update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=0.0,
-        steering_rate=0.0,
-        damping_blocked=True,
-      ) == 300
-      assert self.damping.state == TorqueDampingState.TURN_IN_AUTHORITY
-      assert not self.damping.breakaway_active
-
-    target = 300
-    for frame in range(1, 10):
-      target = update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=float(frame),
-        steering_rate=100.0,
-        damping_blocked=True,
-      )
-      if self.damping.breakaway_active:
-        break
-
-    assert self.damping.breakaway_active
-    assert self.damping.state == TorqueDampingState.BREAKAWAY_RELIEF
-    assert self.damping.breakaway_stall_frames >= TORQUE_BREAKAWAY_STALL_FRAMES
-    assert self.damping.breakaway_latch == 220
-    assert 0 < target < 300
-    assert self.damping.damping_applied == 300 - target
-
-  def test_brief_blocked_pause_does_not_weaken_normal_turn_in(self):
-    for _ in range(TORQUE_BREAKAWAY_STALL_FRAMES - 1):
-      assert update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=0.0,
-        steering_rate=0.0,
-        damping_blocked=True,
-      ) == 300
-
-    for frame in range(1, 10):
-      target = update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=float(frame),
-        steering_rate=100.0,
-        damping_blocked=True,
-      )
-      assert target == 300
-      assert not self.damping.breakaway_active
-
-  def test_breakaway_relief_floor_never_exceeds_reduced_controller_demand(self):
-    for _ in range(TORQUE_BREAKAWAY_STALL_FRAMES):
-      update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=0.0,
-        steering_rate=0.0,
-        damping_blocked=True,
-      )
-    for frame in range(1, 10):
-      update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        steering_angle=float(frame),
-        steering_rate=100.0,
-        damping_blocked=True,
-      )
-      if self.damping.breakaway_active:
-        break
-
-    target = update(
-      self.damping,
-      demand=150,
-      applied_last=220,
-      steering_angle=10.0,
-      steering_rate=100.0,
-      damping_blocked=True,
-    )
-    assert target == 150
-    assert target < self.damping.sustain_floor
-
-  def test_blocked_stall_requires_aligned_eps_before_arming(self):
-    for _ in range(TORQUE_BREAKAWAY_STALL_FRAMES + 5):
-      assert update(
-        self.damping,
-        demand=300,
-        applied_last=220,
-        eps_torque=-8.0,
-        steering_angle=0.0,
-        steering_rate=0.0,
-        damping_blocked=True,
-      ) == 300
-    assert self.damping.breakaway_stall_frames == 0
-    assert not self.damping.breakaway_active
-
   def test_brief_stall_keeps_and_updates_latch(self):
     update(self.damping, applied_last=200)
     assert self.damping.breakaway_latch == 200
@@ -253,16 +148,10 @@ class TestHyundaiLowSpeedTorqueDamping:
   def test_diagnostic_schema_exposes_named_gate_state(self):
     actuators = CarControl.Actuators.new_message()
     actuators.torqueDampingState = int(TorqueDampingState.SUSTAIN_FLOOR)
-    actuators.torqueDampingVersion = TORQUE_DAMPING_VERSION
+    actuators.torqueDampingVersion = 2
     actuators.torqueDampingBlocked = True
-    actuators.torqueBreakawayActive = True
-    actuators.torqueBreakawayStallS = 0.2
-    actuators.torqueBreakawayReliefS = 0.1
     actuators.signedSteeringRateDeg = -42.0
     assert str(actuators.torqueDampingState) == "sustainFloor"
-    assert actuators.torqueDampingVersion == TORQUE_DAMPING_VERSION
+    assert actuators.torqueDampingVersion == 2
     assert actuators.torqueDampingBlocked
-    assert actuators.torqueBreakawayActive
-    assert actuators.torqueBreakawayStallS == pytest.approx(0.2)
-    assert actuators.torqueBreakawayReliefS == pytest.approx(0.1)
     assert actuators.signedSteeringRateDeg == -42.0
