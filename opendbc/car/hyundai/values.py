@@ -16,7 +16,7 @@ class CarControllerParams:
   ACCEL_MAX = 4.0 # m/s^2 (Spysypilot: doubled with the safety firmware limit)
 
   def __init__(self, CP):
-    self.STEER_DELTA_UP = 4  # Spysypilot BLaT: stock 3; faster torque build for 90-degree turns
+    self.STEER_DELTA_UP = 4  # Spysypilot BLaTv2: match the 409/4/7 Hyundai safety envelope
     self.STEER_DELTA_DOWN = 7
     self.STEER_DRIVER_ALLOWANCE = 50
     self.STEER_DRIVER_MULTIPLIER = 2
@@ -52,8 +52,7 @@ class CarControllerParams:
 
     # Default for most HKG
     else:
-      self.STEER_MAX = 409  # Spysypilot BLaT: stock 384; +6.5% steering authority for
-                            # tighter curves before driver-torque fallback (Palisade)
+      self.STEER_MAX = 409  # Spysypilot BLaTv2: Palisade/default Hyundai torque authority
 
 
 class HyundaiSafetyFlags(IntFlag):
