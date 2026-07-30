@@ -11,7 +11,7 @@ from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, \
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
-                                         HyundaiFlags, get_platform_codes, HyundaiSafetyFlags
+                                         CarControllerParams, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 
 Ecu = CarParams.Ecu
@@ -68,6 +68,38 @@ class TestHyundaiFingerprint(unittest.TestCase):
     for car_model in CAR:
       CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
       assert bool(CP.flags & HyundaiFlags.ALT_LIMITS) == bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.ALT_LIMITS)
+      assert bool(CP.flags & HyundaiFlags.ALT_LIMITS_2) == bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.ALT_LIMITS_2)
+      assert bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS) == \
+             bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
+
+    high_limit_platforms = {
+      car_model
+      for car_model in CAR
+      if car_model.config.flags & HyundaiFlags.BLATV2_HIGH_LIMITS
+    }
+    assert high_limit_platforms == {CAR.HYUNDAI_PALISADE}
+
+  def test_blatv2_high_limits_are_vehicle_selected(self):
+    fingerprint = gen_empty_fingerprint()
+    palisade = CarInterface.get_params(CAR.HYUNDAI_PALISADE, fingerprint, [], False, False, False)
+    ordinary = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], False, False, False)
+
+    palisade_limits = CarControllerParams(palisade)
+    ordinary_limits = CarControllerParams(ordinary)
+    assert (
+      palisade_limits.STEER_MAX,
+      palisade_limits.STEER_DELTA_UP,
+      palisade_limits.STEER_DELTA_DOWN,
+    ) == (409, 4, 7)
+    assert palisade_limits.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE
+    assert palisade_limits.BLATV2_RACK_RATE_RESOLUTION_DEG_S == 4.0
+    assert (
+      ordinary_limits.STEER_MAX,
+      ordinary_limits.STEER_DELTA_UP,
+      ordinary_limits.STEER_DELTA_DOWN,
+    ) == (384, 3, 7)
+    assert not ordinary_limits.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE
+    assert ordinary_limits.BLATV2_RACK_RATE_RESOLUTION_DEG_S is None
 
   def test_can_features(self):
     # Test no EV/HEV in any gear lists (should all use ELECT_GEAR)

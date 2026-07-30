@@ -51,9 +51,9 @@ class TestHyundaiSafety(HyundaiButtonBase, common.CarSafetyTest, common.DriverTo
   RELAY_MALFUNCTION_ADDRS = {0: (0x340, 0x485)}  # LKAS11
   FWD_BLACKLISTED_ADDRS = {2: [0x340, 0x485]}
 
-  MAX_RATE_UP = 4
+  MAX_RATE_UP = 3
   MAX_RATE_DOWN = 7
-  MAX_TORQUE_LOOKUP = [0], [409]
+  MAX_TORQUE_LOOKUP = [0], [384]
   MAX_RT_DELTA = 112
   DRIVER_TORQUE_ALLOWANCE = 50
   DRIVER_TORQUE_FACTOR = 2
@@ -121,6 +121,18 @@ class TestHyundaiSafetyAltLimits(TestHyundaiSafety):
     self.packer = CANPackerSafety("hyundai_can_generated")
     self.safety = libsafety_py.libsafety
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.ALT_LIMITS)
+    self.safety.init_tests()
+
+
+class TestHyundaiSafetyBLaTv2HighLimits(TestHyundaiSafety):
+  MAX_RATE_UP = 4
+  MAX_RATE_DOWN = 7
+  MAX_TORQUE_LOOKUP = [0], [409]
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_can_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
     self.safety.init_tests()
 
 

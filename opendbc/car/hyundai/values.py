@@ -16,7 +16,14 @@ class CarControllerParams:
   ACCEL_MAX = 4.0 # m/s^2 (Spysypilot: doubled with the safety firmware limit)
 
   def __init__(self, CP):
-    self.STEER_DELTA_UP = 4  # Spysypilot BLaTv2: match the 409/4/7 Hyundai safety envelope
+    # The generic BLaTv2 command predictor may actuate only on a platform
+    # whose production CarController has explicitly validated this exact
+    # magnitude/driver/rate envelope. Other Hyundai ports remain eligible
+    # for stock control and passive shadowing only.
+    self.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE = bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS)
+    self.BLATV2_RACK_RATE_RESOLUTION_DEG_S = 4.0 if self.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE else None
+
+    self.STEER_DELTA_UP = 3
     self.STEER_DELTA_DOWN = 7
     self.STEER_DRIVER_ALLOWANCE = 50
     self.STEER_DRIVER_MULTIPLIER = 2
@@ -31,6 +38,13 @@ class CarControllerParams:
       self.STEER_THRESHOLD = 250
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
+
+    # Validated Palisade/Telluride envelope. Keep this vehicle-selected:
+    # unvalidated classic Hyundai platforms retain their stock limits.
+    elif CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS:
+      self.STEER_MAX = 409
+      self.STEER_DELTA_UP = 4
+      self.STEER_DELTA_DOWN = 7
 
     # To determine the limit for your car, find the maximum value that the stock LKAS will request.
     # If the max stock LKAS request is <384, add your car to this list.
@@ -52,7 +66,7 @@ class CarControllerParams:
 
     # Default for most HKG
     else:
-      self.STEER_MAX = 409  # Spysypilot BLaTv2: Palisade/default Hyundai torque authority
+      self.STEER_MAX = 384
 
 
 class HyundaiSafetyFlags(IntFlag):
@@ -66,6 +80,7 @@ class HyundaiSafetyFlags(IntFlag):
   CANFD_LKA_STEER_MSG_ALT = 128
   FCEV_GAS = 256
   ALT_LIMITS_2 = 512
+  BLATV2_HIGH_LIMITS = 1024
 
 
 # Hyundai/Kia/Genesis SCC (Smart Cruise Control) and steering architecture:
@@ -146,6 +161,9 @@ class HyundaiFlags(IntFlag):
   FCEV = 2 ** 25
 
   ALT_LIMITS_2 = 2 ** 26
+  # Spysypilot: platform-scoped 409/4/7 steering envelope. This is a vehicle
+  # capability declaration only; BLaTv2 reads the resulting runtime limits.
+  BLATV2_HIGH_LIMITS = 2 ** 27
 
 
 @dataclass
@@ -342,7 +360,7 @@ class CAR(Platforms):
       HyundaiCarDocs("Kia Telluride 2020-22", "All", car_parts=CarParts.common([CarHarness.hyundai_h])),
     ],
     CarSpecs(mass=1999, wheelbase=2.9, steerRatio=15.6 * 1.15, tireStiffnessFactor=0.63),
-    flags=HyundaiFlags.MANDO_RADAR | HyundaiFlags.CHECKSUM_CRC8,
+    flags=HyundaiFlags.MANDO_RADAR | HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.BLATV2_HIGH_LIMITS,
   )
   HYUNDAI_VELOSTER = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Veloster 2019-20", min_enable_speed=5. * CV.MPH_TO_MS, car_parts=CarParts.common([CarHarness.hyundai_e]))],
