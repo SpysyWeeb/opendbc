@@ -54,6 +54,26 @@ bool get_controls_allowed(void){
   return controls_allowed;
 }
 
+bool get_lateral_allowed(void){
+  return lateral_allowed;
+}
+
+void aol_update_test(bool acc_main, bool steering_disengage){
+  aol_update(acc_main, steering_disengage);
+}
+
+void aol_on_lag_test(void){
+  aol_on_lag();
+}
+
+void aol_heartbeat_engaged_check_test(void){
+  aol_heartbeat_engaged_check();
+}
+
+void set_heartbeat_engaged_aol(bool engaged){
+  heartbeat_engaged_aol = engaged;
+}
+
 bool get_ignition_can(void){
   return ignition_can;
 }

@@ -393,16 +393,7 @@ class CarController(CarControllerBase):
 
     if self.frame % 2 == 0 and self.CP.openpilotLongitudinalControl:
       # TODO: unclear if this is needed
-      # Spysypilot: JerkUpperLimit gates the standstill exit -- at the stock 1.0 the car
-      # takes ~1.4s to physically deliver startAccel against brake bleed (field-measured,
-      # routes 5d/61: accCmd pinned while vEgo stays 0). 5.0 is the platform's own
-      # factory-launch floor; stopping/off keep the gentle 1.0 for brake feathering
-      if actuators.longControlState == LongCtrlState.pid:
-        jerk = 3.0
-      elif actuators.longControlState == LongCtrlState.starting:
-        jerk = 5.0
-      else:
-        jerk = 1.0
+      jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
       use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
       can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
                                                       hud_control, set_speed_in_units, stopping,
@@ -429,7 +420,7 @@ class CarController(CarControllerBase):
     lka_steering_long = lka_steering and self.CP.openpilotLongitudinalControl
 
     # steering control
-    can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.enabled, apply_steer_req, apply_torque))
+    can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.latActive, apply_steer_req, apply_torque))
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     if self.frame % 5 == 0 and lka_steering:
@@ -438,7 +429,7 @@ class CarController(CarControllerBase):
 
     # LFA and HDA icons
     if self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
-      can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled))
+      can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.latActive))
 
     # blinkers
     if lka_steering and self.CP.flags & HyundaiFlags.CANFD_ENABLE_BLINKERS:

@@ -4,6 +4,7 @@ import unittest
 
 from opendbc.car.hyundai.values import HyundaiSafetyFlags
 from opendbc.car.structs import CarParams
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.common import CANPackerSafety
@@ -43,6 +44,64 @@ def checksum(msg):
     ret[6 if addr == 0x394 else 7] |= chksum << (4 if addr == 0x421 else 0)
 
   return addr, ret, bus
+
+
+class TestHyundaiAolSafety(unittest.TestCase):
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_can_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0)
+    self.safety.init_tests()
+
+  def _activate_aol_from_controls(self):
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.AOL_ENABLE)
+    self.safety.aol_update_test(False, False)
+    self.safety.set_controls_allowed(True)
+    self.safety.aol_update_test(False, False)
+    self.safety.set_controls_allowed(False)
+    self.safety.aol_update_test(False, False)
+    self.assertTrue(self.safety.get_lateral_allowed())
+
+  def _torque_cmd_msg(self, torque):
+    values = {"CR_Lkas_StrToqReq": torque, "CF_Lkas_ActToi": 1}
+    return self.packer.make_can_msg_safety("LKAS11", 0, values)
+
+  def _accel_msg(self, accel):
+    values = {"aReqRaw": accel, "aReqValue": accel}
+    return self.packer.make_can_msg_safety("SCC12", 0, values)
+
+  def test_aol_allows_only_lateral_after_full_disengagement(self):
+    self._activate_aol_from_controls()
+    self.assertTrue(self.safety.safety_tx_hook(self._torque_cmd_msg(1)))
+
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.LONG)
+    self.safety.init_tests()
+    self._activate_aol_from_controls()
+    self.assertFalse(self.safety.safety_tx_hook(self._accel_msg(1.0)))
+
+  def test_aol_fault_and_heartbeat_fail_safe(self):
+    self._activate_aol_from_controls()
+    self.safety.aol_update_test(False, True)
+    self.assertFalse(self.safety.get_lateral_allowed())
+
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0)
+    self.safety.init_tests()
+    self._activate_aol_from_controls()
+    self.safety.set_heartbeat_engaged_aol(False)
+    for _ in range(3):
+      self.safety.aol_heartbeat_engaged_check_test()
+    self.assertFalse(self.safety.get_lateral_allowed())
+
+  def test_aol_lag_and_disabled_fail_safe(self):
+    self._activate_aol_from_controls()
+    self.safety.aol_on_lag_test()
+    self.assertFalse(self.safety.get_lateral_allowed())
+
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, 0)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(True)
+    self.safety.aol_update_test(False, False)
+    self.assertFalse(self.safety.get_lateral_allowed())
 
 
 class TestHyundaiSafety(HyundaiButtonBase, common.CarSafetyTest, common.DriverTorqueSteeringSafetyTest, common.SteerRequestCutSafetyTest):

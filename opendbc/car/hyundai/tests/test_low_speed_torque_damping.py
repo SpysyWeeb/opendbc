@@ -1,14 +1,19 @@
-import pytest
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.structs import CarControl
+from opendbc.car.hyundai import hyundaicanfd
 from opendbc.car.hyundai.carcontroller import (
+  CarController,
   TORQUE_DAMPING_MAX,
   TORQUE_DAMPING_SUSTAIN_FRACTION,
   HyundaiLowSpeedTorqueDamping,
   SignedHysteresis,
   TorqueDampingState,
 )
+from opendbc.car.hyundai.values import HyundaiFlags
 
 
 STEER_MAX = 409
@@ -19,7 +24,7 @@ def update(damping, demand=300, applied_last=200, eps_torque=8.0, steering_angle
   return damping.update(demand, applied_last, eps_torque, steering_angle, steering_rate, speed, lat_active, steering_pressed, damping_blocked)
 
 
-class TestSignedHysteresis:
+class TestSignedHysteresis(unittest.TestCase):
   def test_deadband_and_exit_hysteresis(self):
     sign = SignedHysteresis(8.0, 4.0)
     assert sign.update(7.9) == 0
@@ -37,8 +42,8 @@ class TestSignedHysteresis:
     assert sign.update(-20.0) == -1
 
 
-class TestHyundaiLowSpeedTorqueDamping:
-  def setup_method(self):
+class TestHyundaiLowSpeedTorqueDamping(unittest.TestCase):
+  def setUp(self):
     self.damping = HyundaiLowSpeedTorqueDamping(STEER_MAX)
     update(self.damping, demand=0, applied_last=0, eps_torque=0.0, steering_angle=0.0, steering_rate=0.0, lat_active=False)
 
@@ -66,11 +71,13 @@ class TestHyundaiLowSpeedTorqueDamping:
     assert target == 150
     assert target < expected_floor
 
-  @pytest.mark.parametrize(("demand", "eps_torque"), [(-300, 8.0), (300, -8.0)])
-  def test_eps_lag_disables_damping_during_request_reversal(self, demand, eps_torque):
-    angle = 1.0 if demand > 0 else -1.0
-    assert update(self.damping, demand=demand, eps_torque=eps_torque, steering_angle=angle) == demand
-    assert self.damping.state == TorqueDampingState.REQUEST_EPS_MISMATCH
+  def test_eps_lag_disables_damping_during_request_reversal(self):
+    for demand, eps_torque in ((-300, 8.0), (300, -8.0)):
+      with self.subTest(demand=demand, eps_torque=eps_torque):
+        self.setUp()
+        angle = 1.0 if demand > 0 else -1.0
+        assert update(self.damping, demand=demand, eps_torque=eps_torque, steering_angle=angle) == demand
+        assert self.damping.state == TorqueDampingState.REQUEST_EPS_MISMATCH
 
   def test_eps_motion_mismatch_preserves_demand(self):
     # Feed enough negative angle motion for the filtered signed rate to enter
@@ -102,11 +109,11 @@ class TestHyundaiLowSpeedTorqueDamping:
     assert full_target < mid_target < off_target
     assert off_target == 300
     assert off.state == TorqueDampingState.SPEED_INACTIVE
-    assert mid.damping_requested == pytest.approx(full.damping_requested / 2.0)
+    self.assertAlmostEqual(mid.damping_requested, full.damping_requested / 2.0)
 
   def test_damping_cap(self):
     update(self.damping, demand=300, applied_last=0, steering_rate=5000.0)
-    assert self.damping.damping_requested == pytest.approx(TORQUE_DAMPING_MAX * STEER_MAX)
+    self.assertAlmostEqual(self.damping.damping_requested, TORQUE_DAMPING_MAX * STEER_MAX)
 
   def test_symmetry(self):
     positive = update(self.damping)
@@ -155,3 +162,28 @@ class TestHyundaiLowSpeedTorqueDamping:
     assert actuators.torqueDampingVersion == 2
     assert actuators.torqueDampingBlocked
     assert actuators.signedSteeringRateDeg == -42.0
+
+
+class TestHyundaiAolCanfdMessages(unittest.TestCase):
+  @patch.object(hyundaicanfd, "create_lfahda_cluster", return_value=("cluster",))
+  @patch.object(hyundaicanfd, "create_steering_messages", return_value=[])
+  def test_aol_uses_lateral_active_for_steering_and_icons(self, create_steering_messages, create_lfahda_cluster):
+    controller = SimpleNamespace(
+      CP=SimpleNamespace(flags=HyundaiFlags.CANFD, openpilotLongitudinalControl=False),
+      CAN=object(),
+      packer=object(),
+      frame=0,
+      last_button_frame=0,
+    )
+    controls = SimpleNamespace(
+      enabled=False,
+      latActive=True,
+      leftBlinker=False,
+      rightBlinker=False,
+      cruiseControl=SimpleNamespace(cancel=False, resume=False),
+    )
+
+    CarController.create_canfd_msgs(controller, True, 100, 0.0, 0.0, False, SimpleNamespace(), SimpleNamespace(), controls)
+
+    self.assertIs(create_steering_messages.call_args.args[3], controls.latActive)
+    self.assertIs(create_lfahda_cluster.call_args.args[2], controls.latActive)
