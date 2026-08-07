@@ -21,6 +21,7 @@ class CarControllerParams:
     # magnitude/driver/rate envelope. Other Hyundai ports remain eligible
     # for stock control and passive shadowing only.
     self.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE = bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS)
+    self.BLATV2_CONTEXTUAL_DYNAMICS_COMPATIBLE = bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS)
     self.BLATV2_RACK_RATE_RESOLUTION_DEG_S = 4.0 if self.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE else None
 
     self.STEER_DELTA_UP = 3

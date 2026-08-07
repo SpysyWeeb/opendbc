@@ -92,6 +92,7 @@ class TestHyundaiFingerprint(unittest.TestCase):
       palisade_limits.STEER_DELTA_DOWN,
     ) == (409, 4, 7)
     assert palisade_limits.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE
+    assert palisade_limits.BLATV2_CONTEXTUAL_DYNAMICS_COMPATIBLE
     assert palisade_limits.BLATV2_RACK_RATE_RESOLUTION_DEG_S == 4.0
     assert (
       ordinary_limits.STEER_MAX,
@@ -99,6 +100,7 @@ class TestHyundaiFingerprint(unittest.TestCase):
       ordinary_limits.STEER_DELTA_DOWN,
     ) == (384, 3, 7)
     assert not ordinary_limits.BLATV2_RUNTIME_ENVELOPE_COMPATIBLE
+    assert not ordinary_limits.BLATV2_CONTEXTUAL_DYNAMICS_COMPATIBLE
     assert ordinary_limits.BLATV2_RACK_RATE_RESOLUTION_DEG_S is None
 
   def test_can_features(self):
