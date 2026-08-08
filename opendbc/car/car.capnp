@@ -389,6 +389,12 @@ struct CarControl {
     torqueBreakawayLatch @16: Float32;      # normalized magnitude
     torqueDampingBlocked @17: Bool;         # future path requires under-tracked turn-in authority
 
+    # Steering request bit emitted toward the platform. This is not proof of
+    # measured EPS or rack torque. Unsupported producers leave validity false.
+    steeringRequestActive @18: Bool;
+    steeringRequestActiveValid @19: Bool;
+    steeringRequestFaultAvoidanceCounter @20: UInt8;  # Hyundai post-update state; valid with steeringRequestActiveValid
+
     enum TorqueDampingState {
       inactive @0;
       driverOverride @1;
