@@ -132,10 +132,6 @@ class CarInterface(CarInterfaceBase):
     ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or Bus.radar not in DBC[ret.carFingerprint]
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
     ret.pcmCruise = not ret.openpilotLongitudinalControl
-    ret.startingState = True
-    ret.vEgoStarting = 0.1
-    ret.startAccel = 1.5  # Spysypilot: firmer commitment off the line (stock 1.0); pid takes
-                          # over at vEgoStarting so exposure is only the first ~0.1 m/s
     ret.longitudinalActuatorDelay = 0.5
 
     if ret.openpilotLongitudinalControl:
