@@ -65,8 +65,8 @@ class CarControllerParams:
 
   DEFAULT_MIN_STEER_SPEED = 0.4            # m/s, newer EPS racks fault below this speed, don't show a low speed alert
 
-  ACCEL_MAX = 2.0                          # 2.0 m/s max acceleration
-  ACCEL_MIN = -3.5                         # 3.5 m/s max deceleration
+  ACCEL_MAX = 2.0                          # 2.0 m/s^2 max acceleration
+  ACCEL_MIN = -3.5                         # 3.5 m/s^2 max deceleration
 
   def __init__(self, CP):
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
@@ -112,6 +112,10 @@ class CarControllerParams:
 
       self.CURVATURE_MAX = 0.195          # Max curvature for steering command, m^-1
       self.CURVATURE_LIMITS = CurvatureSteeringLimits(self.CURVATURE_MAX)
+
+      # Longitudinal constants
+      self.ACCEL_INACTIVE = 3.01  # m/s^2
+      self.JERK_LIMIT = 4.0  # m/s^3
 
       self.shifter_values = can_define.dv["Getriebe_11"]["GE_Fahrstufe"]
       self.hca_status_values = can_define.dv["QFK_01"]["LatCon_HCA_Status"]
@@ -642,6 +646,7 @@ VOLKSWAGEN_VERSION_RESPONSE = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER + 
 VOLKSWAGEN_RX_OFFSET = 0x6a
 
 FW_QUERY_CONFIG = FwQueryConfig(
+  fw_version_regex=br"\xf1\x87[\x00-\xff]{17,58}",
   requests=[request for bus, obd_multiplexing in [(1, True), (1, False), (0, False)] for request in [
     Request(
       [VOLKSWAGEN_VERSION_REQUEST_MULTI],
