@@ -99,6 +99,8 @@ class TestLongitudinalTuningController(unittest.TestCase):
     self.controller.calculate_jerk(self.CC, self.CS, LongCtrlState.pid)
     self.assertEqual(self.controller.jerk_upper, 3.0)
     self.assertEqual(self.controller.jerk_lower, 5.0)
+    self.controller.calculate_jerk(self.CC, self.CS, LongCtrlState.starting)
+    self.assertEqual(self.controller.jerk_upper, 3.0)
     self.controller.calculate_jerk(self.CC, self.CS, LongCtrlState.off)
     self.assertEqual(self.controller.jerk_upper, 1.0)
 
