@@ -20,7 +20,7 @@ jobs:
         uses: peter-evans/create-pull-request@9153d834b60caba6d51c9b9510b087acf9f33f83
         with:
           author: Vehicle Researcher <user@comma.ai>
-          token: ${{ secrets.ACTIONS_CREATE_PR_PAT }}
+          token: ${{ github.token }}
           commit-message: "[bot] Update uv.lock"
           title: "[bot] Update uv.lock"
           body: "Weekly update of uv.lock dependencies"
