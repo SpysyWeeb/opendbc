@@ -136,6 +136,18 @@ class TestHyundaiSafetyAltLimits2(TestHyundaiSafety):
     self.safety.init_tests()
 
 
+class TestHyundaiSafetyBLaTv2HighLimits(TestHyundaiSafety):
+  MAX_RATE_UP = 4
+  MAX_RATE_DOWN = 7
+  MAX_TORQUE_LOOKUP = [0], [409]
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_can_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
+    self.safety.init_tests()
+
+
 class TestHyundaiSafetyCameraSCC(TestHyundaiSafety):
   BUTTONS_TX_BUS = 2  # tx on 2, rx on 0
   SCC_BUS = 2  # rx on 2

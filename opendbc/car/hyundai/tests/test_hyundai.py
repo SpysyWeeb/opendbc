@@ -8,7 +8,7 @@ from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, FW_QUERY_CONFIG, CANFD_FUZZY_WHITELIST, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
-                                         HyundaiFlags, get_platform_codes, HyundaiSafetyFlags
+                                         CarControllerParams, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.testing import fuzzy_test
 
@@ -75,6 +75,19 @@ class TestHyundaiFingerprint(unittest.TestCase):
     for car_model in CAR:
       CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
       assert bool(CP.flags & HyundaiFlags.ALT_LIMITS) == bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.ALT_LIMITS)
+      assert bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS) == \
+             bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
+
+  def test_blatv2_high_limits_are_vehicle_selected(self):
+    fingerprint = gen_empty_fingerprint()
+    palisade = CarInterface.get_params(CAR.HYUNDAI_PALISADE, fingerprint, [], False, False, False)
+    ordinary = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], False, False, False)
+    assert (CarControllerParams(palisade).STEER_MAX,
+            CarControllerParams(palisade).STEER_DELTA_UP,
+            CarControllerParams(palisade).STEER_DELTA_DOWN) == (409, 4, 7)
+    assert (CarControllerParams(ordinary).STEER_MAX,
+            CarControllerParams(ordinary).STEER_DELTA_UP,
+            CarControllerParams(ordinary).STEER_DELTA_DOWN) == (384, 3, 7)
 
   def test_can_features(self):
     for car_model in CAR:
