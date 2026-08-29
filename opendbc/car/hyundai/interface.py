@@ -1,6 +1,6 @@
 from opendbc.car import Bus, get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, HyundaiSafetyFlags
+from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, HyundaiSafetyFlags, PLATFORM_CODE_ECUS, get_platform_codes
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.disable_ecu import disable_ecu
@@ -114,6 +114,15 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.4
     CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    if candidate == CAR.HYUNDAI_PALISADE:
+      # HYUNDAI_PALISADE is shared with the Kia Telluride. The rack trajectory controller and its
+      # torque envelope are only validated on Palisade (LX) firmware; unknown firmware fails closed to stock.
+      platform_codes = {code.split(b"-", 1)[0][:2] for fw in car_fw if fw.ecu in PLATFORM_CODE_ECUS
+                        for code, _ in get_platform_codes([bytes(fw.fwVersion)])}
+      ret.lateralTuning.torque.useRackTrajectory = b"LX" in platform_codes and b"ON" not in platform_codes
+      if not ret.lateralTuning.torque.useRackTrajectory:
+        ret.flags &= ~HyundaiFlags.BLATV2_HIGH_LIMITS.value
 
     if ret.flags & HyundaiFlags.ALT_LIMITS:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.ALT_LIMITS.value
