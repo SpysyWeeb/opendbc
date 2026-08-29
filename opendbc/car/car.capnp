@@ -557,6 +557,7 @@ struct CarParams {
     steeringAngleDeadzoneDeg @5 :Float32;
     latAccelFactor @6 :Float32;
     latAccelOffset @7 :Float32;
+    useRackTrajectory @9 :Bool;  # plan and track a rack motion instead of a lateral accel setpoint
 
     deprecated :group {
       useSteeringAngle @0 :Bool;

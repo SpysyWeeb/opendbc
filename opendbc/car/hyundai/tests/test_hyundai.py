@@ -78,16 +78,35 @@ class TestHyundaiFingerprint(unittest.TestCase):
       assert bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS) == \
              bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
 
-  def test_blatv2_high_limits_are_vehicle_selected(self):
+  def test_rack_trajectory_and_high_limits_are_palisade_lx_only(self):
     fingerprint = gen_empty_fingerprint()
-    palisade = CarInterface.get_params(CAR.HYUNDAI_PALISADE, fingerprint, [], False, False, False)
-    ordinary = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], False, False, False)
-    assert (CarControllerParams(palisade).STEER_MAX,
-            CarControllerParams(palisade).STEER_DELTA_UP,
-            CarControllerParams(palisade).STEER_DELTA_DOWN) == (409, 4, 7)
-    assert (CarControllerParams(ordinary).STEER_MAX,
-            CarControllerParams(ordinary).STEER_DELTA_UP,
-            CarControllerParams(ordinary).STEER_DELTA_DOWN) == (384, 3, 7)
+    eps_versions = FW_VERSIONS[CAR.HYUNDAI_PALISADE][(Ecu.eps, 0x7d4, None)]
+    lx_fw = [fw for fw in eps_versions if b"LX" in fw][:1]
+    on_fw = [fw for fw in eps_versions if b"ON" in fw][:1]
+    assert lx_fw and on_fw
+
+    def params(car, fw_versions):
+      car_fw = [CarParams.CarFw(ecu=Ecu.eps, fwVersion=fw) for fw in fw_versions]
+      return CarInterface.get_params(car, fingerprint, car_fw, False, False, False)
+
+    def limits(CP):
+      return CarControllerParams(CP).STEER_MAX, CarControllerParams(CP).STEER_DELTA_UP, CarControllerParams(CP).STEER_DELTA_DOWN
+
+    palisade = params(CAR.HYUNDAI_PALISADE, lx_fw)
+    assert palisade.lateralTuning.torque.useRackTrajectory
+    assert limits(palisade) == (409, 4, 7)
+    assert palisade.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.BLATV2_HIGH_LIMITS
+
+    # Telluride, mixed and unknown firmware fail closed to the stock controller and envelope
+    for fw_versions in (on_fw, lx_fw + on_fw, []):
+      CP = params(CAR.HYUNDAI_PALISADE, fw_versions)
+      assert not CP.lateralTuning.torque.useRackTrajectory
+      assert limits(CP) == (384, 3, 7)
+      assert not CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.BLATV2_HIGH_LIMITS
+
+    ordinary = params(CAR.HYUNDAI_SONATA, [])
+    assert not ordinary.lateralTuning.torque.useRackTrajectory
+    assert limits(ordinary) == (384, 3, 7)
 
   def test_can_features(self):
     for car_model in CAR:
