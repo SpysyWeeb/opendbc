@@ -48,6 +48,9 @@ def process_hud_alert(enabled, fingerprint, hud_control):
   return sys_warning, sys_state, left_lane_warning, right_lane_warning
 
 
+
+HOLD_WITHOUT_STOPREQ = True  # field experiment, see CarController.update
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -83,6 +86,11 @@ class CarController(CarControllerBase):
     # accel + longitudinal
     accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     stopping = actuators.longControlState == LongCtrlState.stopping
+    # FIELD EXPERIMENT (Spysypilot, 2026-08-29): hold at standstill on the brake request alone, never StopReq. CAN logs
+    # show the Palisade's ESP running a ~1.4 s standstill-exit sequence after StopReq drops before any launch begins;
+    # this drive measures whether that sequence is tied to StopReq. Flat roads only until the hold is proven to persist;
+    # the driver is the backstop. Revert by setting HOLD_WITHOUT_STOPREQ to False.
+    stopping = stopping and not HOLD_WITHOUT_STOPREQ
     set_speed_in_units = hud_control.setSpeed * (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
 
     can_sends = []
