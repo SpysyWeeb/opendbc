@@ -83,6 +83,12 @@ class CarController(CarControllerBase):
     # accel + longitudinal
     accel = float(np.clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX))
     stopping = actuators.longControlState == LongCtrlState.stopping
+    # Spysypilot: on CAN the standstill hold is the brake request alone, StopReq is never asserted. With StopReq the
+    # Palisade's ESP runs a fixed ~1.4 s standstill-exit sequence after it drops before any launch begins (CAN-decoded,
+    # routes 23/28, 2026-08-29/30), which is most of every green-light and lead-launch delay; the SCC holds the car on
+    # aReq at stopAccel. The jerk limits still follow the stopping state. Whether the hold persists on grades and over
+    # long waits is the owner's field verdict (first drive 2026-08-30), not an assumption; the driver is the backstop.
+    stop_req = False
     set_speed_in_units = hud_control.setSpeed * (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
 
     can_sends = []
@@ -115,7 +121,7 @@ class CarController(CarControllerBase):
       torque_fault = CC.latActive and not apply_steer_req
 
       can_sends.extend(self.create_can_msgs(apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel,
-                                            stopping, hud_control, actuators, CS, CC))
+                                            stop_req, hud_control, actuators, CS, CC))
 
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / self.params.STEER_MAX
