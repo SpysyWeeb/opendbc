@@ -17,6 +17,12 @@ MAX_ANGLE = 85
 MAX_ANGLE_FRAMES = 89
 MAX_ANGLE_CONSECUTIVE_FRAMES = 2
 
+# SCC14 JerkUpperLimit while the wheels are still: the standstill-exit window the deleted `starting` state used to own
+LAUNCH_JERK_UPPER = 5.0   # bracketed best on the Palisade (1.0/3.0/5.0/7.0 -> 1390/960/790/1200 ms command to roll)
+LAUNCH_JERK_SPEED = 0.1   # m/s, the old vEgoStarting: the window closes the moment the car is actually moving
+PID_JERK_UPPER = 3.0      # everywhere else under openpilot longitudinal
+STOPPING_JERK_UPPER = 1.0 # stopping and off: gentle, for brake feathering
+
 # On some HKG CAN and CAN FD non-CANFD_ALT_BUTTONS, the cancel button (CF_Clu_CruiseSwState / CRUISE_BUTTONS = 4) is
 # a pause/resume toggle, not a dedicated cancel. Firing it mid-brake inadvertently can cause a re-enable attempt
 # and triggers the "SCC Conditions Not Met" alert. Delaying the button send lets factory SCC disengage
@@ -46,6 +52,24 @@ def process_hud_alert(enabled, fingerprint, hud_control):
     right_lane_warning = 1 if fingerprint in (CAR.GENESIS_G90, CAR.GENESIS_G80) else 2
 
   return sys_warning, sys_state, left_lane_warning, right_lane_warning
+
+
+def acc_jerk_upper(long_control_state, v_ego):
+  """SCC14 JerkUpperLimit.
+
+  Spysypilot: this field gates the standstill exit. It is a permission, not a command -- the realized acceleration
+  ramp is ~140 ms (~8 m/s^3) whatever the limit says, so it decides WHEN the SCC commits to the launch, not how hard
+  the car launches. Bracketed on the Palisade with the start-from-stop maneuver, one variable, command -> wheel roll:
+  1.0 = 1390 ms, 3.0 = 960, 5.0 = 790 (best), 7.0 = 1200 (plateau confirmed, so 5.0 is a measured floor).
+
+  5.0 was locked and rode on the `starting` LongCtrlState until upstream deleted that state (opendbc #3562,
+  openpilot #38340, July 2026); this fork inherited the deletion through a sync merge, which quietly put every launch
+  back on the bracket's 3.0 arm. The window below is the old `starting` window written out -- the pid state while the
+  wheels are still. `stopping` and off keep the gentle 1.0 for brake feathering.
+  """
+  if long_control_state == LongCtrlState.pid:
+    return LAUNCH_JERK_UPPER if v_ego < LAUNCH_JERK_SPEED else PID_JERK_UPPER
+  return STOPPING_JERK_UPPER
 
 
 class CarController(CarControllerBase):
@@ -157,16 +181,7 @@ class CarController(CarControllerBase):
 
     if self.frame % 2 == 0 and self.CP.openpilotLongitudinalControl:
       # TODO: unclear if this is needed
-      # Spysypilot: JerkUpperLimit gates the standstill exit -- at the stock 1.0 the car
-      # takes ~1.4s to physically deliver startAccel against brake bleed (field-measured,
-      # routes 5d/61: accCmd pinned while vEgo stays 0). 5.0 is the platform's own
-      # factory-launch floor; stopping/off keep the gentle 1.0 for brake feathering
-      if actuators.longControlState == LongCtrlState.pid:
-        jerk = 3.0
-      elif actuators.longControlState == LongCtrlState.starting:
-        jerk = 5.0
-      else:
-        jerk = 1.0
+      jerk = acc_jerk_upper(actuators.longControlState, CS.out.vEgo)
       use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
       can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
                                                       hud_control, set_speed_in_units, stopping,

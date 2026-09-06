@@ -3,6 +3,8 @@ import unittest
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.structs import CarParams
 from opendbc.car.fw_versions import build_fw_dict
+from opendbc.car.hyundai.carcontroller import (LAUNCH_JERK_SPEED, LAUNCH_JERK_UPPER, PID_JERK_UPPER,
+                                               STOPPING_JERK_UPPER, acc_jerk_upper)
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
@@ -288,3 +290,30 @@ class TestHyundaiFingerprint(unittest.TestCase):
         platforms_with_shared_codes.add(platform)
 
     assert platforms_with_shared_codes == excluded_platforms
+
+
+class TestHyundaiLaunchJerk(unittest.TestCase):
+  # the standstill-exit window the deleted `starting` LongCtrlState used to own. The bracket on the Palisade
+  # (command -> wheel roll) was 1.0 = 1390 ms, 3.0 = 960, 5.0 = 790, 7.0 = 1200, so 5.0 is a measured optimum
+  def test_the_launch_window_is_the_pid_state_while_the_wheels_are_still(self):
+    from opendbc.car.structs import CarControl
+    state = CarControl.Actuators.LongControlState
+    assert acc_jerk_upper(state.pid, 0.0) == LAUNCH_JERK_UPPER
+    assert acc_jerk_upper(state.pid, LAUNCH_JERK_SPEED - 1e-6) == LAUNCH_JERK_UPPER
+    assert acc_jerk_upper(state.pid, LAUNCH_JERK_SPEED) == PID_JERK_UPPER
+    assert acc_jerk_upper(state.pid, 20.0) == PID_JERK_UPPER
+
+  def test_stopping_and_off_keep_the_gentle_limit_at_any_speed(self):
+    from opendbc.car.structs import CarControl
+    state = CarControl.Actuators.LongControlState
+    for v in (0.0, 0.05, 1.0, 20.0):
+      assert acc_jerk_upper(state.stopping, v) == STOPPING_JERK_UPPER
+      assert acc_jerk_upper(state.off, v) == STOPPING_JERK_UPPER
+
+  def test_every_value_encodes_exactly_on_scc14(self):
+    # JerkUpperLimit is 7 bits at 0.1 m/s^3 (0..12.7); a value that does not land on the quantum would be silently
+    # truncated on the bus, which is how a "5.0" could reach the car as something else
+    for value in (LAUNCH_JERK_UPPER, PID_JERK_UPPER, STOPPING_JERK_UPPER):
+      raw = round(value / 0.1)
+      assert 0 <= raw <= 127
+      assert abs(raw * 0.1 - value) < 1e-9
