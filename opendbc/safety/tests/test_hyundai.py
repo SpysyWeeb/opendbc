@@ -4,9 +4,7 @@ import unittest
 
 from opendbc.car.hyundai.values import HyundaiSafetyFlags
 from opendbc.car.structs import CarParams
-from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
-from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.hyundai_common import HyundaiButtonBase, HyundaiLongitudinalBase
 
 
@@ -125,15 +123,11 @@ class TestHyundaiSafetyAltLimits2(TestHyundaiSafety):
 
 
 class TestHyundaiSafetyBLaTv2HighLimits(TestHyundaiSafety):
+  SAFETY_PARAM = HyundaiSafetyFlags.BLATV2_HIGH_LIMITS
+
   MAX_RATE_UP = 4
   MAX_RATE_DOWN = 7
   MAX_TORQUE_LOOKUP = [0], [409]
-
-  def setUp(self):
-    self.packer = CANPackerSafety("hyundai_can_generated")
-    self.safety = libsafety_py.libsafety
-    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.BLATV2_HIGH_LIMITS)
-    self.safety.init_tests()
 
 
 class TestHyundaiSafetyCameraSCC(TestHyundaiSafety):
