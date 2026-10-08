@@ -29,9 +29,10 @@
 #include "opendbc/safety/modes/elm327.h"
 #include "opendbc/safety/modes/body.h"
 #include "opendbc/safety/modes/psa.h"
+#include "opendbc/safety/modes/byd.h"
 #include "opendbc/safety/modes/hyundai_canfd.h"
 
-uint32_t GET_BYTES(const CANPacket_t *msg, int start, int len) {
+uint32_t GET_BYTES_LE(const CANPacket_t *msg, int start, int len) {
   uint32_t ret = 0U;
   for (int i = 0; i < len; i++) {
     const uint32_t shift = i * 8;
@@ -41,7 +42,7 @@ uint32_t GET_BYTES(const CANPacket_t *msg, int start, int len) {
 }
 
 // Read up to eight bytes in little-endian order, without alignment assumptions.
-uint64_t GET_BYTES_64(const CANPacket_t *msg, int start, int len) {
+uint64_t GET_BYTES_64_LE(const CANPacket_t *msg, int start, int len) {
   uint64_t ret = 0U;
   for (int i = 0; i < len; i++) {
     const uint32_t shift = i * 8;
@@ -420,6 +421,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
     {SAFETY_MG, &mg_hooks},
     {SAFETY_CHRYSLER_CUSW, &chrysler_cusw_hooks},
     {SAFETY_PSA, &psa_hooks},
+    {SAFETY_BYD, &byd_hooks},
     {SAFETY_SUBARU_PREGLOBAL, &subaru_preglobal_hooks},
     {SAFETY_VOLKSWAGEN_MLB, &volkswagen_mlb_hooks},
     {SAFETY_VOLKSWAGEN_PQ, &volkswagen_pq_hooks},
