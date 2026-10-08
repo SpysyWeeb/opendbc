@@ -152,7 +152,7 @@ class HyundaiFlags(IntFlag):
   FCEV = 2 ** 25
 
   ALT_LIMITS_2 = 2 ** 26
-  BLATV2_HIGH_LIMITS = 2 ** 27
+  BLATV2_HIGH_LIMITS = 2 ** 28
 
   HAS_BSM = 2 ** 27  # blind spot monitoring
 

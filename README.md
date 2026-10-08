@@ -46,6 +46,16 @@ While the primary focus is on supporting ADAS interfaces for [openpilot](https:/
 This README and the [supported cars list](docs/CARS.md) are all the docs for the opendbc project.
 Everything you need to know to use, contribute, and extend opendbc are in these docs.
 
+## Fork adaptation: Hyundai capability flags (326d848a)
+
+The `combo-blatv2-409-horizon` adaptation moves only Python `HyundaiFlags.BLATV2_HIGH_LIMITS`
+from bit 27 to unused bit 28 of `CarParams.flags` (UInt32), leaving upstream `HAS_BSM` at bit 27.
+BSM detection is independent of Palisade firmware eligibility and front-radar availability.
+The existing LX-only gate, unknown/ON/mixed-firmware stock fallback, 409/+4/-7 steering envelope,
+all safetyParam values (including BLaTv2's 1024), and driver-torque handoff remain unchanged.
+Regression coverage exercises the real car interface and all other Hyundai-family platforms;
+Hyundai car tests and native CAN/CAN-FD safety tests pass locally. This is not device or field qualification.
+
 ## Quick start
 
 ```bash

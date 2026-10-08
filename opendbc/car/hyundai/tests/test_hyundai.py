@@ -111,6 +111,58 @@ class TestHyundaiFingerprint(unittest.TestCase):
     assert not ordinary.lateralTuning.torque.useRackTrajectory
     assert limits(ordinary) == (384, 3, 7)
 
+  def test_high_limit_flag_is_disjoint(self):
+    assert HyundaiFlags.HAS_BSM == 2 ** 27
+    assert HyundaiSafetyFlags.BLATV2_HIGH_LIMITS == 1024
+    assert 0 < HyundaiFlags.BLATV2_HIGH_LIMITS < 2 ** 32
+    # Iterating IntFlag itself omits aliases, including the original HAS_BSM collision.
+    for name, flag in HyundaiFlags.__members__.items():
+      if name != "BLATV2_HIGH_LIMITS":
+        assert not flag & HyundaiFlags.BLATV2_HIGH_LIMITS, name
+
+  def test_palisade_bsm_independent_of_firmware_and_radar(self):
+    eps_versions = FW_VERSIONS[CAR.HYUNDAI_PALISADE][(Ecu.eps, 0x7d4, None)]
+    lx_fw = [fw for fw in eps_versions if b"LX" in fw][:1]
+    on_fw = [fw for fw in eps_versions if b"ON" in fw][:1]
+    assert lx_fw and on_fw
+    for bsm in (False, True):
+      for radar in (False, True):
+        for fw_versions in (lx_fw, [], on_fw, lx_fw + on_fw):
+          with self.subTest(bsm=bsm, radar=radar, fw_versions=fw_versions):
+            fingerprint = gen_empty_fingerprint()
+            if bsm:
+              fingerprint[0][0x58b] = 8
+            if radar:
+              fingerprint[1][RADAR_START_ADDR] = 8
+            car_fw = [CarParams.CarFw(ecu=Ecu.eps, fwVersion=fw) for fw in fw_versions]
+            CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE, fingerprint, car_fw, False, False, False)
+            assert bool(CP.flags & HyundaiFlags.HAS_BSM) == bsm
+            assert CP.radarUnavailable != radar
+            eligible = fw_versions == lx_fw
+            assert CP.lateralTuning.torque.useRackTrajectory == eligible
+            assert bool(CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS) == eligible
+            assert CP.safetyConfigs[-1].safetyParam == (1024 if eligible else 0)
+            limits = CarControllerParams(CP)
+            assert (limits.STEER_MAX, limits.STEER_DELTA_UP, limits.STEER_DELTA_DOWN) == ((409, 4, 7) if eligible else (384, 3, 7))
+
+  def test_bsm_does_not_enable_high_limits_on_other_platforms(self):
+    for car_model in CAR:
+      if car_model == CAR.HYUNDAI_PALISADE:
+        continue
+      for bsm in (False, True):
+        with self.subTest(car_model=car_model, bsm=bsm):
+          fingerprint = gen_empty_fingerprint()
+          stock = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
+          if bsm:
+            canfd = car_model.config.flags & HyundaiFlags.CANFD
+            fingerprint[CanBus(stock).ECAN if canfd else 0][0x1ba if canfd else 0x58b] = 8
+          CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
+          assert bool(CP.flags & HyundaiFlags.HAS_BSM) == bsm
+          assert not CP.flags & HyundaiFlags.BLATV2_HIGH_LIMITS
+          assert not CP.lateralTuning.torque.useRackTrajectory
+          assert CP.safetyConfigs[-1].safetyParam == stock.safetyConfigs[-1].safetyParam
+          assert vars(CarControllerParams(CP)) == vars(CarControllerParams(stock))
+
   def test_can_features(self):
     for car_model in CAR:
       flags = car_model.config.flags
