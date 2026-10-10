@@ -30,6 +30,23 @@ bool safety_config_valid() {
   return true;
 }
 
+bool get_lateral_allowed(void) {
+  return lateral_allowed;
+}
+
+void set_aol_heartbeat(bool engaged) {
+  heartbeat_engaged_aol = engaged;
+}
+
+void aol_heartbeat_tick(void) {
+  aol_heartbeat_engaged_check();
+}
+
+void set_aol_inputs(bool main_on, bool steering_fault) {
+  acc_main_on = main_on;
+  steering_disengage = steering_fault;
+}
+
 void set_controls_allowed(bool c){
   controls_allowed = c;
 }

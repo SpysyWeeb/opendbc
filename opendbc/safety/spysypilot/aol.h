@@ -1,0 +1,171 @@
+#pragma once
+
+#include "opendbc/safety/spysypilot/aol_types.h"
+
+#include "opendbc/safety/declarations.h"
+
+// Global definitions
+bool lateral_allowed = false;    // main steering permission flag read by lateral.h
+bool aol_rx_checks_invalid = false;
+bool lfa_button_press = false;   // set by hyundai / hyundai_canfd rx_hook on LFA button press
+bool main_button_press = false;  // set by hyundai / hyundai_canfd rx_hook on cruise main button press
+AolState aol_state;
+bool heartbeat_engaged_aol = false;
+uint32_t heartbeat_engaged_aol_mismatches = 0U;
+
+// aol_init — reset all AOL state to off.
+// Called from set_safety_hooks() on every safety mode change.
+static inline void aol_init(void) {
+  lateral_allowed = false;
+  aol_rx_checks_invalid = false;
+  lfa_button_press = false;
+  main_button_press = false;
+  heartbeat_engaged_aol = false;
+  heartbeat_engaged_aol_mismatches = 0U;
+
+  aol_state.lfa_button.pressed      = false;
+  aol_state.lfa_button.last_pressed = false;
+  aol_state.lfa_button.rising_edge  = false;
+  aol_state.lfa_button.falling_edge = false;
+
+  aol_state.main_button.pressed      = false;
+  aol_state.main_button.last_pressed = false;
+  aol_state.main_button.rising_edge  = false;
+  aol_state.main_button.falling_edge = false;
+
+  aol_state.acc_main.current      = false;
+  aol_state.acc_main.previous     = false;
+  aol_state.acc_main.rising_edge  = false;
+  aol_state.acc_main.falling_edge = false;
+
+  aol_state.op_controls_allowed.current      = false;
+  aol_state.op_controls_allowed.previous     = false;
+  aol_state.op_controls_allowed.rising_edge  = false;
+  aol_state.op_controls_allowed.falling_edge = false;
+
+  aol_state.steering_fault.current      = false;
+  aol_state.steering_fault.previous     = false;
+  aol_state.steering_fault.rising_edge  = false;
+  aol_state.steering_fault.falling_edge = false;
+
+  aol_state.system_active  = false;
+  aol_state.last_disengage = AOL_DISENGAGE_NONE;
+}
+
+// aol_on_lag — immediately revoke lateral permission when a safety-critical
+// message lags. Called from safety_tick() to clear lateral_allowed on OP crash.
+static inline void aol_on_lag(void) {
+  aol_rx_checks_invalid = true;
+  if (lateral_allowed) {
+    lateral_allowed = false;
+    aol_state.last_disengage = AOL_DISENGAGE_LAG;
+  }
+}
+
+// aol_update — core AOL decision function. Called from safety_rx_hook() on
+// every relevant CAN message so edges are detected as soon as they occur.
+//
+// acc_main         : whether the car's ACC main switch is currently armed
+// steering_disengage : whether the car has flagged a steering disengage/fault
+//
+// Activation (sets lateral_allowed = true):
+//   - Rising edge on the physical LFA/LKAS button  (lfa_button_press set by rx_hook)
+//   - Rising edge on the cruise main button         (main_button_press set by rx_hook;
+//                                                     used as the AOL toggle on cars,
+//                                                     like the Palisade, with no LFA button)
+//   - Rising edge on acc_main                       (ACC system just armed)
+//   - Rising edge on controls_allowed                (openpilot just achieved full engagement;
+//                                                     ensures lateral keeps running under AOL if
+//                                                     openpilot later disengages without the user
+//                                                     ever having pressed the AOL toggle button)
+//
+// Deactivation (clears lateral_allowed):
+//   - Falling edge on acc_main   (ACC main turned off)
+//   - Rising edge on steering_disengage (EPS fault / car disengagement)
+//   - AOL feature disabled via alternative_experience
+//   - Message lag  (handled separately in aol_on_lag)
+//
+// REMAIN_ACTIVE: brake / gas presses do NOT affect lateral_allowed.
+static inline void aol_update(bool acc_main, bool steering_fault) {
+  // Check if the AOL feature is enabled
+  const bool supported = (current_safety_mode == SAFETY_HYUNDAI) || (current_safety_mode == SAFETY_HYUNDAI_LEGACY) ||
+                         (current_safety_mode == SAFETY_HYUNDAI_CANFD);
+  aol_state.system_active = supported && ((alternative_experience & ALT_EXP_AOL_ENABLE) != 0);
+
+  // If the feature is disabled but we're still allowing lateral, revoke it
+  if (!aol_state.system_active) {
+    if (lateral_allowed) {
+      lateral_allowed = false;
+      aol_state.last_disengage = AOL_DISENGAGE_DISABLED;
+    }
+  } else {
+    // --- Edge detection: acc_main ---
+    aol_state.acc_main.current      = acc_main;
+    aol_state.acc_main.rising_edge  = aol_state.acc_main.current && !aol_state.acc_main.previous;
+    aol_state.acc_main.falling_edge = !aol_state.acc_main.current && aol_state.acc_main.previous;
+
+    // --- Edge detection: openpilot's own controls_allowed (full engagement) ---
+    aol_state.op_controls_allowed.current      = controls_allowed;
+    aol_state.op_controls_allowed.rising_edge  = aol_state.op_controls_allowed.current && !aol_state.op_controls_allowed.previous;
+    aol_state.op_controls_allowed.falling_edge = !aol_state.op_controls_allowed.current && aol_state.op_controls_allowed.previous;
+
+    // --- Edge detection: steering_disengage ---
+    aol_state.steering_fault.current      = steering_fault;
+    aol_state.steering_fault.rising_edge  = aol_state.steering_fault.current && !aol_state.steering_fault.previous;
+    aol_state.steering_fault.falling_edge = !aol_state.steering_fault.current && aol_state.steering_fault.previous;
+
+    // --- Edge detection: LFA button (written by hyundai rx_hook each frame) ---
+    aol_state.lfa_button.pressed      = lfa_button_press;
+    aol_state.lfa_button.rising_edge  = aol_state.lfa_button.pressed && !aol_state.lfa_button.last_pressed;
+    aol_state.lfa_button.falling_edge = !aol_state.lfa_button.pressed && aol_state.lfa_button.last_pressed;
+
+    // --- Edge detection: cruise main button (written by hyundai rx_hook each frame) ---
+    aol_state.main_button.pressed      = main_button_press;
+    aol_state.main_button.rising_edge  = aol_state.main_button.pressed && !aol_state.main_button.last_pressed;
+    aol_state.main_button.falling_edge = !aol_state.main_button.pressed && aol_state.main_button.last_pressed;
+
+    // --- Activation: LFA button, cruise main button, acc_main, or controls_allowed rising edge ---
+    if (aol_state.lfa_button.rising_edge || aol_state.main_button.rising_edge ||
+        aol_state.acc_main.rising_edge || aol_state.op_controls_allowed.rising_edge) {
+      lateral_allowed = !aol_rx_checks_invalid;
+    }
+
+    // --- Deactivation: acc_main turned off ---
+    if (aol_state.acc_main.falling_edge) {
+      lateral_allowed = false;
+      aol_state.last_disengage = AOL_DISENGAGE_ACC_MAIN_OFF;
+    }
+
+    // --- Deactivation: car reported steering fault / disengage ---
+    if (steering_fault) {
+      lateral_allowed = false;
+      aol_state.last_disengage = AOL_DISENGAGE_STEERING_FAULT;
+    }
+
+    // Save current values as previous for next cycle
+    aol_state.acc_main.previous           = aol_state.acc_main.current;
+    aol_state.op_controls_allowed.previous = aol_state.op_controls_allowed.current;
+    aol_state.steering_fault.previous = aol_state.steering_fault.current;
+    aol_state.lfa_button.last_pressed     = aol_state.lfa_button.pressed;
+    aol_state.main_button.last_pressed    = aol_state.main_button.pressed;
+  }
+}
+
+// aol_heartbeat_engaged_check — called at 1Hz from panda firmware's
+// main loop. If lateral_allowed is true but Python's heartbeat has stopped confirming AOL is
+// active for 3 consecutive checks, force-revoke lateral_allowed. This catches the case where
+// the Python AolDriver state machine and the panda's lateral_allowed flag have silently
+// diverged (e.g. Python crashed, or a bug causes Python to think AOL is off while panda still
+// thinks it's on).
+// cppcheck-suppress unusedFunction ; called by panda board/main.c
+static inline void aol_heartbeat_engaged_check(void) {
+  if (lateral_allowed && !heartbeat_engaged_aol) {
+    heartbeat_engaged_aol_mismatches += 1U;
+    if (heartbeat_engaged_aol_mismatches >= 3U) {
+      lateral_allowed = false;
+      aol_state.last_disengage = AOL_DISENGAGE_HEARTBEAT_MISMATCH;
+    }
+  } else {
+    heartbeat_engaged_aol_mismatches = 0U;
+  }
+}

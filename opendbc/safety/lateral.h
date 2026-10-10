@@ -1,4 +1,5 @@
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/spysypilot/aol.h"
 
 // ISO 11270
 static const float ISO_LATERAL_ACCEL = 3.0;  // m/s^2
@@ -61,7 +62,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   bool violation = false;
   uint32_t ts = microsecond_timer_get();
 
-  if (controls_allowed) {
+  if (controls_allowed || lateral_allowed) {
     // Some safety models support variable torque limit based on vehicle speed
     int max_torque = limits.max_torque;
     if (limits.dynamic_max_torque) {
@@ -96,7 +97,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   }
 
   bool torque_requested = desired_torque != 0;
-  if (!controls_allowed && torque_requested) {
+  if (!(controls_allowed || lateral_allowed) && torque_requested) {
     violation = true;
   }
 
@@ -138,7 +139,7 @@ bool steer_torque_cmd_checks(int desired_torque, int steer_req, const TorqueStee
   }
 
   // reset to 0 if either controls is not allowed or there's a violation
-  if (violation || !controls_allowed) {
+  if (violation || !(controls_allowed || lateral_allowed)) {
     valid_steer_req_count = 0;
     invalid_steer_req_count = 0;
     desired_torque_last = 0;

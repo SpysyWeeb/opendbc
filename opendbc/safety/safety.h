@@ -115,6 +115,7 @@ static bool is_msg_valid(RxCheck addr_list[], int index) {
     if (!addr_list[index].status.valid_checksum || !addr_list[index].status.valid_quality_flag || (addr_list[index].status.wrong_counters >= MAX_WRONG_COUNTERS)) {
       valid = false;
       controls_allowed = false;
+      aol_on_lag();
     }
   }
   return valid;
@@ -205,8 +206,16 @@ bool safety_rx_hook(const CANPacket_t *msg) {
     current_hooks->rx(msg);
   }
 
+  // Optional classic Hyundai LFA button: not fitted on every car, so not a
+  // required RX check. Keep its address, bus and length explicit.
+  if (((current_safety_mode == SAFETY_HYUNDAI) || (current_safety_mode == SAFETY_HYUNDAI_LEGACY)) &&
+      msg_matches(msg, 0x391U, 0U, 8U)) {
+    lfa_button_press = GET_BIT(msg, 4U);
+  }
+
   // Handles gas, brake, and regen paddle
   generic_rx_checks();
+  aol_update(acc_main_on, steering_disengage);
 
   // the relay malfunction hook runs on all incoming rx messages.
   // check all applicable tx msgs for liveness on sending bus.
@@ -337,10 +346,12 @@ void safety_tick(void) {
     if (lagging || frequency_invalid || !is_msg_valid(current_safety_config.rx_checks, i)) {
       rx_checks_invalid = true;
       controls_allowed = false;
+      aol_on_lag();
     }
   }
 
   safety_rx_checks_invalid = rx_checks_invalid;
+  aol_rx_checks_invalid = rx_checks_invalid;
 }
 
 static void relay_malfunction_set(void) {
@@ -456,6 +467,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   reset_sample(&angle_meas);
 
   controls_allowed = false;
+  aol_init();
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
 
@@ -533,5 +545,6 @@ void speed_mismatch_check(const float speed_2) {
   bool is_invalid_speed = SAFETY_ABS(speed_2 - ((float)vehicle_speed.values[0] / VEHICLE_SPEED_FACTOR)) > MAX_SPEED_DELTA;
   if (is_invalid_speed) {
     controls_allowed = false;
+    lateral_allowed = false;
   }
 }

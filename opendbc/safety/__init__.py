@@ -8,3 +8,4 @@ class ALTERNATIVE_EXPERIENCE:
   DISABLE_STOCK_AEB = 2
   RAISE_LONGITUDINAL_LIMITS_TO_ISO_MAX = 8
   ALLOW_AEB = 16
+  AOL_ENABLE = 1024  # Always-On-Lateral: allow steering without ACC engagement

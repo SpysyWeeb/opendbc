@@ -148,6 +148,9 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
     int cruise_button = msg->data[0] & 0x7U;
     bool main_button = GET_BIT(msg, 3U);
     hyundai_common_cruise_buttons_check(cruise_button, main_button);
+
+    // AOL: cruise main button doubles as the AOL toggle on cars with no LFA button
+    main_button_press = main_button;
   }
 
   // gas press, different for EV, hybrid, and ICE models
@@ -175,7 +178,7 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
 }
 
 static bool hyundai_tx_hook(const CANPacket_t *msg) {
-  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS = HYUNDAI_LIMITS(384, 3, 7);
+  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS = HYUNDAI_LIMITS(409, 4, 7);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT = HYUNDAI_LIMITS(270, 2, 3);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT_2 = HYUNDAI_LIMITS(170, 2, 3);
 
