@@ -49,6 +49,7 @@ static inline void aol_init(void) {
   aol_state.steering_fault.falling_edge = false;
 
   aol_state.system_active  = false;
+  aol_state.activation_pending = false;
   aol_state.last_disengage = AOL_DISENGAGE_NONE;
 }
 
@@ -56,6 +57,7 @@ static inline void aol_init(void) {
 // message lags. Called from safety_tick() to clear lateral_allowed on OP crash.
 static inline void aol_on_lag(void) {
   aol_rx_checks_invalid = true;
+  aol_state.activation_pending = false;
   if (lateral_allowed) {
     lateral_allowed = false;
     aol_state.last_disengage = AOL_DISENGAGE_LAG;
@@ -68,22 +70,25 @@ static inline void aol_on_lag(void) {
 // acc_main         : whether the car's ACC main switch is currently armed
 // steering_disengage : whether the car has flagged a steering disengage/fault
 //
-// Activation (sets lateral_allowed = true):
+// CAN activation candidates (do NOT alone grant lateral permission):
 //   - Rising edge on the physical LFA/LKAS button  (lfa_button_press set by rx_hook)
 //   - Rising edge on the cruise main button         (main_button_press set by rx_hook;
 //                                                     used as the AOL toggle on cars,
 //                                                     like the Palisade, with no LFA button)
 //   - Rising edge on acc_main                       (ACC system just armed)
-//   - Rising edge on controls_allowed                (openpilot just achieved full engagement;
-//                                                     ensures lateral keeps running under AOL if
-//                                                     openpilot later disengages without the user
-//                                                     ever having pressed the AOL toggle button)
+//   - Rising edge on controls_allowed               (full engagement)
+// A candidate waits for a true host SOL heartbeat, since CAN reaches safety
+// before the host processes the button and sends its request. False heartbeats
+// never grant permission, even if new CAN activation edges arrive afterwards.
+// Do not toggle every physical button here: safety does not receive the host's
+// HAS_LDA_BUTTON capability, which determines whether mainCruise is ignored.
 //
 // Deactivation (clears lateral_allowed):
 //   - Falling edge on acc_main   (ACC main turned off)
 //   - Rising edge on steering_disengage (EPS fault / car disengagement)
 //   - AOL feature disabled via alternative_experience
 //   - Message lag  (handled separately in aol_on_lag)
+//   - Explicit host off heartbeat (handled synchronously in USB receive)
 //
 // REMAIN_ACTIVE: brake / gas presses do NOT affect lateral_allowed.
 static inline void aol_update(bool acc_main, bool steering_fault) {
@@ -94,6 +99,7 @@ static inline void aol_update(bool acc_main, bool steering_fault) {
 
   // If the feature is disabled but we're still allowing lateral, revoke it
   if (!aol_state.system_active) {
+    aol_state.activation_pending = false;
     if (lateral_allowed) {
       lateral_allowed = false;
       aol_state.last_disengage = AOL_DISENGAGE_DISABLED;
@@ -127,18 +133,24 @@ static inline void aol_update(bool acc_main, bool steering_fault) {
     // --- Activation: LFA button, cruise main button, acc_main, or controls_allowed rising edge ---
     if (aol_state.lfa_button.rising_edge || aol_state.main_button.rising_edge ||
         aol_state.acc_main.rising_edge || aol_state.op_controls_allowed.rising_edge) {
-      lateral_allowed = !aol_rx_checks_invalid;
+      aol_state.activation_pending = !aol_rx_checks_invalid;
+    }
+    if (aol_state.activation_pending && heartbeat_engaged_aol && !aol_rx_checks_invalid) {
+      lateral_allowed = true;
+      aol_state.activation_pending = false;
     }
 
     // --- Deactivation: acc_main turned off ---
     if (aol_state.acc_main.falling_edge) {
       lateral_allowed = false;
+      aol_state.activation_pending = false;
       aol_state.last_disengage = AOL_DISENGAGE_ACC_MAIN_OFF;
     }
 
     // --- Deactivation: car reported steering fault / disengage ---
     if (steering_fault) {
       lateral_allowed = false;
+      aol_state.activation_pending = false;
       aol_state.last_disengage = AOL_DISENGAGE_STEERING_FAULT;
     }
 
@@ -151,12 +163,21 @@ static inline void aol_update(bool acc_main, bool steering_fault) {
   }
 }
 
-// aol_heartbeat_engaged_check — called at 1Hz from panda firmware's
-// main loop. If lateral_allowed is true but Python's heartbeat has stopped confirming AOL is
-// active for 3 consecutive checks, force-revoke lateral_allowed. This catches the case where
-// the Python AolDriver state machine and the panda's lateral_allowed flag have silently
-// diverged (e.g. Python crashed, or a bug causes Python to think AOL is off while panda still
-// thinks it's on).
+// An explicit host off request is authoritative immediately, not after a
+// mismatch grace period. Called by panda's USB heartbeat handler.
+// cppcheck-suppress unusedFunction ; called by panda board/main_comms.h
+static inline void aol_heartbeat_received(bool engaged) {
+  heartbeat_engaged_aol = engaged;
+  if (!engaged) {
+    lateral_allowed = false;
+    aol_state.last_disengage = AOL_DISENGAGE_HEARTBEAT_MISMATCH;
+  }
+}
+
+// Defensive mismatch check at 1Hz. Normal explicit-off reception revokes above
+// immediately, so it never relies on this grace period. Complete heartbeat
+// loss is handled by panda's existing heartbeat_counter -> SILENT watchdog;
+// the mode reset clears both the request and any pending CAN activation.
 // cppcheck-suppress unusedFunction ; called by panda board/main.c
 static inline void aol_heartbeat_engaged_check(void) {
   if (lateral_allowed && !heartbeat_engaged_aol) {

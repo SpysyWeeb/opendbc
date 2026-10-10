@@ -34,8 +34,12 @@ bool get_lateral_allowed(void) {
   return lateral_allowed;
 }
 
+bool get_aol_activation_pending(void) {
+  return aol_state.activation_pending;
+}
+
 void set_aol_heartbeat(bool engaged) {
-  heartbeat_engaged_aol = engaged;
+  aol_heartbeat_received(engaged);
 }
 
 void aol_heartbeat_tick(void) {

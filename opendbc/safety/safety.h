@@ -546,5 +546,6 @@ void speed_mismatch_check(const float speed_2) {
   if (is_invalid_speed) {
     controls_allowed = false;
     lateral_allowed = false;
+    aol_state.activation_pending = false;
   }
 }

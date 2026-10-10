@@ -38,6 +38,7 @@ typedef struct {
   AolBoolState   op_controls_allowed; // openpilot's own controls_allowed (full engagement) state
   AolBoolState   steering_fault;  // Car-reported steering disengage / fault flag
   bool           system_active;       // True when ALT_EXP_AOL_ENABLE is set
+  bool activation_pending;           // CAN enable edge awaiting host confirmation
   AolDisengageReason last_disengage;  // Most recent reason for deactivation
 } AolState;
 
@@ -47,5 +48,5 @@ extern bool lateral_allowed;    // Main per-cycle steering permission flag read 
 extern bool lfa_button_press;   // Set by hyundai / hyundai_canfd rx_hook on LFA button press
 extern bool main_button_press;  // Set by hyundai / hyundai_canfd rx_hook on cruise main button press
 extern AolState aol_state;
-extern bool heartbeat_engaged_aol;             // Set by USB heartbeat command (0xf3, param2) when Python confirms AOL is active
+extern bool heartbeat_engaged_aol;             // Set by USB heartbeat command (0xf3, param2) when the host requests AOL enabled
 extern uint32_t heartbeat_engaged_aol_mismatches; // count of cycles lateral_allowed and heartbeat_engaged_aol have disagreed
