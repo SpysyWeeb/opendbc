@@ -1,4 +1,5 @@
 import opendbc.safety.tests.common as common
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.libsafety import libsafety_py
 from opendbc.safety.tests.common import make_msg
 
@@ -72,8 +73,34 @@ class HyundaiButtonBase:
 
 class HyundaiLongitudinalBase(common.LongitudinalAccelSafetyTest):
 
+  MAX_ACCEL = 4.0  # Hyundai's host and native ceiling; other brands keep their own limits.
+
   DISABLED_ECU_UDS_MSG: tuple[int, int]
   DISABLED_ECU_ACTUATION_MSG: tuple[int, int]
+
+  def test_accel_fields_and_lateral_only_permission(self):
+    packet = self._accel_msg(0)
+    for state in ("disabled", "sol", "active", "gas"):
+      self.setUp()
+      if state == "sol":
+        self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.AOL_ENABLE)
+        self.safety.set_aol_heartbeat(True)
+        self.assertTrue(self._rx(self._button_msg(Buttons.NONE, main_button=1)))
+        self.assertTrue(self.safety.get_lateral_allowed())
+        self.assertFalse(self.safety.get_controls_allowed())
+        self.assertTrue(self._tx(self._torque_cmd_msg(1)))
+      else:
+        self.safety.set_controls_allowed(state in ("active", "gas"))
+        self.safety.set_gas_pressed_prev(state == "gas")
+
+      # Each field independently owns a safety boundary; a valid sibling must not mask it.
+      for field in ("aReqRaw", "aReqValue"):
+        for accel in (-3.51, -3.5, 0.0, 2.01, 4.0, 4.01):
+          with self.subTest(state=state, field=field, accel=accel):
+            values = {"aReqRaw": 0.0, "aReqValue": 0.0, field: accel}
+            msg = self.packer.make_can_msg_safety(packet[0].addr, packet[0].bus, values)
+            expected = accel == 0.0 or (state == "active" and -3.5 <= accel <= 4.0)
+            self.assertEqual(expected, self._tx(msg))
 
   # override these tests from CarSafetyTest, hyundai longitudinal uses button enable
   def test_disable_control_allowed_from_cruise(self):

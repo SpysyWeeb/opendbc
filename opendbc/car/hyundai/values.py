@@ -13,7 +13,7 @@ Ecu = CarParams.Ecu
 
 class CarControllerParams:
   ACCEL_MIN = -3.5 # m/s^2
-  ACCEL_MAX = 2.0 # m/s^2
+  ACCEL_MAX = 4.0 # m/s^2; paired with HYUNDAI_LONG_LIMITS in native safety
 
   def __init__(self, CP):
     self.STEER_DELTA_UP = 3
