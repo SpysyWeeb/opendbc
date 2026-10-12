@@ -59,7 +59,6 @@ static const CanMsg HYUNDAI_TX_MSGS[] = {
 static bool hyundai_legacy = false;
 
 static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
-
   uint8_t cnt = 0;
   if (msg->addr == 0x260U) {
     cnt = (msg->data[7] >> 4) & 0x3U;
@@ -80,7 +79,6 @@ static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
 }
 
 static uint32_t hyundai_get_checksum(const CANPacket_t *msg) {
-
   uint8_t chksum = 0;
   if (msg->addr == 0x260U) {
     chksum = msg->data[7] & 0xFU;
@@ -117,11 +115,11 @@ static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
     // sum of nibbles
     for (int i = 0; i < 8; i++) {
       if ((msg->addr == 0x394U) && (i == 7)) {
-        continue; // exclude
+        continue;  // exclude
       }
       uint8_t b = msg->data[i];
       if (((msg->addr == 0x260U) && (i == 7)) || ((msg->addr == 0x394U) && (i == 6)) || ((msg->addr == 0x421U) && (i == 7))) {
-        b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U; // remove checksum
+        b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U;  // remove checksum
       }
       chksum += (b % 16U) + (b / 16U);
     }
@@ -132,16 +130,15 @@ static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
 }
 
 static void hyundai_rx_hook(const CANPacket_t *msg) {
-
   // SCC12 is on bus 2 for camera-based SCC cars, bus 0 on all others
   if (msg_matches(msg, 0x421U, hyundai_camera_scc ? 2U : 0U)) {
     // 2 bits: 13-14
-    int cruise_engaged = (GET_BYTES(msg, 0, 4) >> 13) & 0x3U;
+    int cruise_engaged = (GET_BYTES_LE(msg, 0, 4) >> 13) & 0x3U;
     hyundai_common_cruise_state_check(cruise_engaged);
   }
 
   if (msg_matches(msg, 0x251U, 0U)) {
-    int torque_driver_new = (GET_BYTES(msg, 0, 2) & 0x7ffU) - 1024U;
+    int torque_driver_new = (GET_BYTES_LE(msg, 0, 2) & 0x7ffU) - 1024U;
     // update array of samples
     update_sample(&torque_driver, torque_driver_new);
   }
@@ -167,8 +164,8 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
 
   // sample wheel speed, averaging opposite corners
   if (msg_matches(msg, 0x386U, 0U)) {
-    uint32_t front_left_speed = GET_BYTES(msg, 0, 2) & 0x3FFFU;
-    uint32_t rear_right_speed = GET_BYTES(msg, 6, 2) & 0x3FFFU;
+    uint32_t front_left_speed = GET_BYTES_LE(msg, 0, 2) & 0x3FFFU;
+    uint32_t rear_right_speed = GET_BYTES_LE(msg, 6, 2) & 0x3FFFU;
     vehicle_moving = (front_left_speed > HYUNDAI_STANDSTILL_THRSLD) || (rear_right_speed > HYUNDAI_STANDSTILL_THRSLD);
   }
 
@@ -219,7 +216,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 
   // LKA STEER: safety check
   if (msg->addr == 0x340U) {
-    int desired_torque = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
+    int desired_torque = ((GET_BYTES_LE(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
     bool steer_req = GET_BIT(msg, 27U);
 
     const TorqueSteeringLimits limits = hyundai_alt_limits_2 ? HYUNDAI_STEERING_LIMITS_ALT_2 :
@@ -232,7 +229,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 
   // UDS: Only tester present ("\x02\x3E\x80\x00\x00\x00\x00\x00") allowed on diagnostics address
   if (msg->addr == 0x7D0U) {
-    if (GET_BYTES_64(msg, 0, 8) != 0x0000000000803E02ULL) {
+    if (GET_BYTES_64_LE(msg, 0, 8) != 0x0000000000803E02ULL) {
       tx = false;
     }
   }
@@ -254,9 +251,9 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 static safety_config hyundai_init(uint16_t param) {
   static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
     HYUNDAI_LONG_COMMON_TX_MSGS(0)
-    {0x38D, 0, 8, .check_relay = false}, // FCA11 Bus 0
-    {0x483, 0, 8, .check_relay = false}, // FCA12 Bus 0
-    {0x7D0, 0, 8, .check_relay = false}, // radar UDS TX addr Bus 0 (for radar disable)
+    {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0
+    {0x483, 0, 8, .check_relay = false},  // FCA12 Bus 0
+    {0x7D0, 0, 8, .check_relay = false},  // radar UDS TX addr Bus 0 (for radar disable)
   };
 
   static const CanMsg HYUNDAI_CAMERA_SCC_TX_MSGS[] = {
@@ -292,7 +289,6 @@ static safety_config hyundai_init(uint16_t param) {
     } else {
       SET_TX_MSGS(HYUNDAI_LONG_TX_MSGS, ret);
     }
-
   } else if (hyundai_camera_scc) {
     static RxCheck hyundai_cam_scc_rx_checks[] = {
       HYUNDAI_COMMON_RX_CHECKS(false)
