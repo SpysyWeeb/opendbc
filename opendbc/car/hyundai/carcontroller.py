@@ -61,10 +61,12 @@ class CarController(CarControllerBase):
     self.car_fingerprint = CP.carFingerprint
     self.last_button_frame = 0
     self.cancel_counter = 0
+    self.lead_display = hyundaican.LeadDisplay()
 
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
     hud_control = CC.hudControl
+    obj_gap = self.lead_display.update(hud_control.leadDistance, CS.out.vEgo)
 
     # steering torque
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
@@ -115,7 +117,7 @@ class CarController(CarControllerBase):
       torque_fault = CC.latActive and not apply_steer_req
 
       can_sends.extend(self.create_can_msgs(apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel,
-                                            stopping, hud_control, actuators, CS, CC))
+                                            stopping, hud_control, obj_gap, actuators, CS, CC))
 
     new_actuators = actuators.as_builder()
     new_actuators.torque = apply_torque / self.params.STEER_MAX
@@ -125,7 +127,7 @@ class CarController(CarControllerBase):
     self.frame += 1
     return new_actuators, can_sends
 
-  def create_can_msgs(self, apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel, stopping, hud_control, actuators, CS, CC):
+  def create_can_msgs(self, apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel, stopping, hud_control, obj_gap, actuators, CS, CC):
     can_sends = []
 
     # HUD messages
@@ -154,7 +156,7 @@ class CarController(CarControllerBase):
       jerk = 3.0 if actuators.longControlState == LongCtrlState.pid else 1.0
       use_fca = self.CP.flags & HyundaiFlags.USE_FCA.value
       can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
-                                                      hud_control, set_speed_in_units, stopping,
+                                                      hud_control, obj_gap, set_speed_in_units, stopping,
                                                       CC.cruiseControl.override, use_fca, self.CP))
 
     # 20 Hz LFA MFA message
