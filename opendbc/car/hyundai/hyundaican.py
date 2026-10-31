@@ -1,3 +1,4 @@
+from opendbc.car import DT_CTRL
 from opendbc.car.crc import CRC8J1850, mk_crc8_fun
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 
@@ -125,7 +126,44 @@ def create_lfahda_mfc(packer, enabled):
   return packer.make_can_msg("LFAHDA_MFC", 0, values)
 
 
-def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CP):
+class LeadDisplay:
+  # Mirrors stock SCC's cluster lead: a lead is shown after 1.5 s of continuous presence and dropped 0.5 s after it
+  # is lost, and its gap level has 0.15 s of hysteresis, as stock's radar does. The input is still openpilot's raw
+  # lead, only its presentation follows stock. Constants are fit to stock cruise logs on a 2021 Palisade
+  SHOW_FRAMES = round(1.5 / DT_CTRL)
+  HIDE_FRAMES = round(0.5 / DT_CTRL)
+  GAP_OFFSET = 5.  # m, fit offset from openpilot's lead distance to stock's gap
+  MIN_SPEED = 1.5  # m/s, so a lead still gets a gap level at a stop
+  GAPS = {3: 1.2, 4: 1.5, 5: 1.8}  # s, time gap at which each ObjGap level starts
+  GAP_HYSTERESIS = 0.15  # s
+
+  def __init__(self):
+    self.shown = False
+    self.frames = 0
+    self.distance = 0.
+    self.level = 2
+
+  def update(self, lead_distance, v_ego):
+    present = lead_distance > 0  # a NaN distance counts as no lead, a NaN speed holds the level
+    self.frames = self.frames + 1 if present != self.shown else 0
+    if self.frames >= (self.HIDE_FRAMES if self.shown else self.SHOW_FRAMES):
+      self.shown = not self.shown
+      self.frames = 0
+    if not self.shown:
+      self.level = 2
+      return 0
+
+    if present:
+      self.distance = lead_distance
+    gap = (self.distance - self.GAP_OFFSET) / max(v_ego, self.MIN_SPEED)
+    while self.level < 5 and gap >= self.GAPS[self.level + 1]:
+      self.level += 1
+    while self.level > 2 and gap < self.GAPS[self.level] - self.GAP_HYSTERESIS:
+      self.level -= 1
+    return self.level
+
+
+def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, obj_gap, set_speed, stopping, long_override, use_fca, CP):
   commands = []
 
   scc11_values = {
@@ -166,7 +204,7 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
     "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
     "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
     "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
-    "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    "ObjGap": obj_gap, # 5: farthest, 2: closest, 0: no lead
   }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))
 
