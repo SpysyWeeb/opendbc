@@ -6,6 +6,7 @@ from opendbc.car.fw_versions import build_fw_dict
 from opendbc.car.hyundai.carcontroller import (LAUNCH_JERK_SPEED, LAUNCH_JERK_UPPER, PID_JERK_UPPER,
                                                STOPPING_JERK_UPPER, acc_jerk_upper)
 from opendbc.car.hyundai.interface import CarInterface
+from opendbc.car.hyundai.hyundaican import LeadDisplay
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
 from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, FW_QUERY_CONFIG, CANFD_FUZZY_WHITELIST, \
@@ -286,3 +287,34 @@ class TestHyundaiLaunchJerk(unittest.TestCase):
       raw = round(value / 0.1)
       assert 0 <= raw <= 127
       assert abs(raw * 0.1 - value) < 1e-9
+
+
+class TestHyundaiLeadDisplay(unittest.TestCase):
+  def setUp(self):
+    self.lead_display = LeadDisplay()
+
+  def update(self, frames, dist, v_ego=20.):
+    return {self.lead_display.update(dist, v_ego) for _ in range(frames)}
+
+  def test_debounce(self):
+    assert self.update(100, 45.) == {0}
+    assert self.update(1, 0.) == {0}  # a dropout restarts the count
+    assert self.update(149, 45.) == {0}  # shown after 1.5 s
+    assert self.update(1, 45.) == {5}
+    assert self.update(10, 0.) == {5}  # the last distance is held while the lead is missing
+    assert self.update(1, 45.) == {5}  # and the hide count restarts
+    assert self.update(49, float('nan')) == {5}
+    assert self.update(1, 0.) == {0}  # hidden after 0.5 s
+
+  def test_hysteresis(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 25.)
+    for dist, obj_gap in [(31., 3), (37., 4), (45., 5), (39., 5), (37., 4), (33., 4), (31., 3)]:  # 1.3, 1.6, 2.0, 1.7, 1.6, 1.4, 1.3 s
+      assert self.update(1, dist) == {obj_gap}, dist
+
+  def test_reshow_at_stop(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 45.)
+    self.update(LeadDisplay.HIDE_FRAMES, 0.)
+    assert self.update(LeadDisplay.SHOW_FRAMES - 1, 6.6, 0.) == {0}
+    assert self.update(1, 6.6, 0.) == {2}  # starts over from 2, a kept 5 would step down to 3
+    assert self.update(1, 8., 0.) == {5}
+    assert self.update(1, 6.6, float('nan')) == {5}  # a NaN speed holds the level

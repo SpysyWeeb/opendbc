@@ -30,7 +30,7 @@ def test_lateral_only_hud_without_longitudinal_permission(canfd, lat_active):
     msgs = controller.create_canfd_msgs(lat_active, 0, 0, 0, False, cc.hudControl, cs, cc)
     names = ["LFA", "SCC_CONTROL"]
   else:
-    msgs = controller.create_can_msgs(lat_active, 0, False, 0, 0, False, cc.hudControl, cc.actuators, cs, cc)
+    msgs = controller.create_can_msgs(lat_active, 0, False, 0, 0, False, cc.hudControl, 0, cc.actuators, cs, cc)
     names = ["LKAS11", "LFAHDA_MFC", "SCC12", "SCC14"]
   parser = CANParser(dbc, [(name, 0) for name in names], 0)
   parser.update([(0, msgs)])
