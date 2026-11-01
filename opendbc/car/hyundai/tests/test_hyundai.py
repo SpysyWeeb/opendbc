@@ -318,3 +318,11 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
     assert self.update(1, 6.6, 0.) == {2}  # starts over from 2, a kept 5 would step down to 3
     assert self.update(1, 8., 0.) == {5}
     assert self.update(1, 6.6, float('nan')) == {5}  # a NaN speed holds the level
+
+  def test_distance_jump(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 20.)
+    assert self.update(1, 45.) == {2}  # a jump is a different object, the level holds
+    assert self.update(1, 21.) == {2}  # until the lead is back
+    assert self.update(LeadDisplay.SHOW_FRAMES - 1, 45.) == {2}  # and the count restarts
+    assert self.update(1, 45.) == {5}  # taken after 1.5 s, like a new lead
+    assert self.update(1, 37.) == {4}  # a small step is taken at once

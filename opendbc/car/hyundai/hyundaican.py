@@ -136,10 +136,13 @@ class LeadDisplay:
   MIN_SPEED = 1.5  # m/s, so a lead still gets a gap level at a stop
   GAPS = {3: 1.2, 4: 1.5, 5: 1.8}  # s, time gap at which each ObjGap level starts
   GAP_HYSTERESIS = 0.15  # s
+  JUMP = 5.  # m
+  JUMP_RATIO = 0.3
 
   def __init__(self):
     self.shown = False
     self.frames = 0
+    self.jump_frames = 0
     self.distance = 0.
     self.level = 2
 
@@ -149,12 +152,19 @@ class LeadDisplay:
     if self.frames >= (self.HIDE_FRAMES if self.shown else self.SHOW_FRAMES):
       self.shown = not self.shown
       self.frames = 0
+      self.jump_frames = 0
+      self.distance = lead_distance
     if not self.shown:
       self.level = 2
       return 0
 
     if present:
-      self.distance = lead_distance
+      # a distance jump is a different object: hold the level until it has been seen for SHOW_FRAMES, like a new lead
+      jump = abs(lead_distance - self.distance) > max(self.JUMP, self.JUMP_RATIO * self.distance)
+      self.jump_frames = self.jump_frames + 1 if jump else 0
+      if not jump or self.jump_frames >= self.SHOW_FRAMES:
+        self.distance = lead_distance
+        self.jump_frames = 0
     gap = (self.distance - self.GAP_OFFSET) / max(v_ego, self.MIN_SPEED)
     while self.level < 5 and gap >= self.GAPS[self.level + 1]:
       self.level += 1
