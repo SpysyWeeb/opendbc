@@ -131,9 +131,11 @@ class LeadDisplay:
   # Mirrors stock SCC's cluster lead: a lead is shown after 1.5 s of continuous presence and dropped 0.5 s after it
   # is lost, and its gap level has 0.15 s of hysteresis, as stock's radar does. The input is still openpilot's raw
   # lead, only its presentation follows stock. Constants are fit to stock cruise logs on a 2021 Palisade.
-  # When openpilot sends the distance it holds at this speed, the level reads the held distance against it instead:
-  # 2 under 0.8 of it, 3 from 0.8, 4 from 1.1 and 5 from 1.5, each kept until 0.05 under its start, so the icon shows
-  # the gap against openpilot's target, not the personality. Without a target the time gap below is used
+  # When openpilot sends the distance it holds at this speed, the level reads the held distance against it instead.
+  # At the target the icon sits on the mark just past the gap bars: 2 for 1 bar, 3 for 2 and 4 for 3 (3 when no bars
+  # are sent). It moves one mark per band of held distance over target: closer from 0.8 and again from 0.6, farther
+  # from 1.1, 1.5 and 2.0, each band kept until 0.05 under its start, and the level stays within 2 to 5. Without a
+  # target the time gap below is used
   SHOW_FRAMES = round(1.5 / DT_CTRL)
   HIDE_FRAMES = round(0.5 / DT_CTRL)
   GAP_OFFSET = 5.  # m, fit offset from openpilot's lead distance to stock's gap
@@ -148,7 +150,8 @@ class LeadDisplay:
   # time-gap thresholds are past the floors and the display is unchanged
   FLOORS = {3: 9., 4: 12., 5: 15.}  # m, held distance at which each level can start
   FLOOR_HYSTERESIS = 1.  # m
-  RATIOS = {3: 0.8, 4: 1.1, 5: 1.5}  # held distance over target distance at which each level starts
+  # held distance over target distance at which each band starts; band 0 is at the target, -2 is under 0.6
+  BANDS = {-1: 0.6, 0: 0.8, 1: 1.1, 2: 1.5, 3: 2.0}
   RATIO_HYSTERESIS = 0.05
 
   def __init__(self):
@@ -157,9 +160,11 @@ class LeadDisplay:
     self.jump_frames = 0
     self.distance = 0.
     self.level = 2
+    self.band = -2  # ratio band against the target, kept apart from the time-gap level
+    self.held = 2
     self.cap = 2
 
-  def update(self, lead_distance, v_ego, target_distance=0.):
+  def update(self, lead_distance, v_ego, target_distance=0., lead_distance_bars=0):
     present = lead_distance > 0  # a NaN distance counts as no lead, a NaN speed or a NaN or infinite target holds the level
     self.frames = self.frames + 1 if present != self.shown else 0
     if self.frames >= (self.HIDE_FRAMES if self.shown else self.SHOW_FRAMES):
@@ -169,6 +174,8 @@ class LeadDisplay:
       self.distance = lead_distance
     if not self.shown:
       self.level = 2
+      self.band = -2
+      self.held = 2
       self.cap = 2
       return 0
 
@@ -180,14 +187,24 @@ class LeadDisplay:
         self.distance = lead_distance
         self.jump_frames = 0
     if 0 < target_distance and math.isfinite(target_distance):
-      self._step(self.distance / target_distance, self.RATIOS, self.RATIO_HYSTERESIS)
+      ratio = self.distance / target_distance
+      while self.band < 3 and ratio >= self.BANDS[self.band + 1]:
+        self.band += 1
+      while self.band > -2 and ratio < self.BANDS[self.band] - self.RATIO_HYSTERESIS:
+        self.band -= 1
+      anchor = min(max(lead_distance_bars + 1, 2), 4) if lead_distance_bars > 0 else 3
+      level = min(max(anchor + self.band, 2), 5)
     elif target_distance <= 0:  # a NaN or infinite target is neither and holds the level
       self._step((self.distance - self.GAP_OFFSET) / max(v_ego, self.MIN_SPEED), self.GAPS, self.GAP_HYSTERESIS)
+      level = self.level
+    else:
+      level = self.held  # a NaN or infinite target holds the last level of either rule
     while self.cap < 5 and self.distance >= self.FLOORS[self.cap + 1]:
       self.cap += 1
     while self.cap > 2 and self.distance < self.FLOORS[self.cap] - self.FLOOR_HYSTERESIS:
       self.cap -= 1
-    return min(self.level, self.cap)
+    self.held = level
+    return min(level, self.cap)
 
   def _step(self, value, starts, hysteresis):
     while self.level < 5 and value >= starts[self.level + 1]:

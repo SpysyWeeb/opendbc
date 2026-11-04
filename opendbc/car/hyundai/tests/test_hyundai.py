@@ -293,10 +293,11 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
   def setUp(self):
     self.lead_display = LeadDisplay()
 
-  def update(self, frames, dist, v_ego=20., target=None):
-    if target is None:
-      return {self.lead_display.update(dist, v_ego) for _ in range(frames)}
-    return {self.lead_display.update(dist, v_ego, target) for _ in range(frames)}
+  def update(self, frames, dist, v_ego=20., target=None, bars=None):
+    # None means not sent: the defaults, 0. (no target, time gap) and 0 (no bars, anchor 3)
+    target = 0. if target is None else target
+    bars = 0 if bars is None else bars
+    return {self.lead_display.update(dist, v_ego, target, bars) for _ in range(frames)}
 
   def test_debounce(self):
     assert self.update(100, 45.) == {0}
@@ -406,7 +407,8 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
       assert levels == [negative.update(d, v_ego, -1.) for d in dists], v_ego
 
   def test_target_mode_switch(self):
-    # the target may come and go between frames: one level is kept and each frame steps it by that frame's rule
+    # the target may come and go between frames: the time-gap level and the ratio band are kept apart, each frame
+    # steps the one its rule uses
     self.update(LeadDisplay.SHOW_FRAMES, 40., 29., 36.)
     for dist, target, obj_gap in [(40., 36., 4),  # 1.11
                                   (40., 0., 3),  # 1.21 s
@@ -417,8 +419,63 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
                                   (32., 36., 3),  # 0.89
                                   (28., 36., 3),  # 0.78, kept from 3
                                   (28., 0., 2),  # 0.79 s
-                                  (28., 36., 2)]:  # 0.78, under 0.8 from 2
+                                  (28., 36., 3)]:  # 0.78, the band is still kept from 3
       assert self.update(1, dist, 29., target) == {obj_gap}, (dist, target)
+    for dist, target, bars in [(28., 36., 1), (28., 0., 3), (28., 36., 3), (40., float('nan'), 1), (40., 0., 1), (40., 36., 3)]:
+      assert self.update(1, dist, 29., target, bars) <= {2, 3, 4, 5}, (dist, target, bars)
+
+  def test_target_anchor_aggressive(self):
+    # 1 bar puts the icon on 2 at the target, then one mark per band: 3 from 1.1, 4 from 1.5 and 5 from 2.0 of 36 m
+    self.update(LeadDisplay.SHOW_FRAMES, 30., 29., 36., 1)
+    for dist, obj_gap in [(30., 2), (33., 2), (36., 2), (39.5, 2), (39.6, 3), (44., 3), (49., 3), (53.9, 3), (54., 4), (58., 4),
+                          (62., 4), (66., 4), (70., 4), (71.9, 4), (72., 5), (70.2, 5), (70.1, 4), (66., 4), (62., 4), (58., 4),
+                          (54., 4), (52.2, 4), (52.1, 3), (48., 3), (44., 3), (40., 3), (37.9, 3), (37.7, 2), (33., 2), (29., 2)]:
+      assert self.update(1, dist, 29., 36., 1) == {obj_gap}, dist
+    # 37.8 / 36 rounds to just under 1.05, so 37.9 and 37.7 bracket it
+
+  def test_target_anchor_standard(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 25., 29., 36., 2)
+    for dist, obj_gap in [(28.7, 2), (28.8, 3), (33., 3), (36., 3), (39.5, 3), (39.6, 4), (44., 4), (49., 4), (53.9, 4), (54., 5)]:
+      assert self.update(1, dist, 29., 36., 2) == {obj_gap}, dist
+
+  def test_target_anchor_relaxed(self):
+    # 3 bars put the icon on 4 at the target (from 0.8 of 58 m), 5 from 1.1, 3 under 0.8 and 2 under 0.6
+    self.update(LeadDisplay.SHOW_FRAMES, 30., 29., 58., 3)
+    for dist, obj_gap in [(30., 2), (34.7, 2), (34.8, 3), (39., 3), (44., 3), (46.4, 3), (46.5, 4), (51., 4), (56., 4), (58., 4),
+                          (63.8, 4), (63.9, 5), (68., 5), (63.9, 5), (61., 5), (60.8, 4), (56., 4), (51., 4), (46., 4), (43.6, 4), (43.4, 3),
+                          (39., 3), (35., 3), (32., 3), (31.8, 2)]:
+      assert self.update(1, dist, 29., 58., 3) == {obj_gap}, dist
+    # 5 is kept to 60.9 m and 4 to 43.5 m (1.05 and 0.75 x 58) in exact terms; float ties, so each is bracketed
+
+  def test_target_anchor_bars_clamp(self):
+    # no bars (0, or a caller that sends none) is anchor 3, as 2 bars; bars past 3 clamp to anchor 4
+    dists = [20. + 60. * abs(((i / 300.) % 2.) - 1.) for i in range(3000)]  # 80..20..80 m, a 6 s triangle
+
+    def levels(target, bars):
+      display = LeadDisplay()
+      if bars is None:
+        return [display.update(d, 29., target) for d in dists]
+      return [display.update(d, 29., target, bars) for d in dists]
+
+    for target in (36., 58.):
+      assert levels(target, None) == levels(target, 0) == levels(target, 2) == levels(target, -1), target
+      assert levels(target, 4) == levels(target, 3) != levels(target, 2), target
+      assert levels(target, 1) != levels(target, 2), target
+
+  def test_target_anchor_personality_change(self):
+    # at a fixed 36 m against a 36 m target, a personality change moves the icon by one mark in the same frame
+    self.update(LeadDisplay.SHOW_FRAMES, 36., 29., 36., 1)
+    for bars, obj_gap in [(1, 2), (2, 3), (3, 4), (2, 3), (1, 2)]:
+      assert self.update(1, 36., 29., 36., bars) == {obj_gap}, bars
+
+  def test_target_anchor_floors(self):
+    # the floors still cap: an engaged stop 5.9 m behind a 7 m target reads 2, and 3 bars do not lift a close car
+    self.update(LeadDisplay.SHOW_FRAMES - 1, 5.9, 0., 7., 1)
+    assert self.update(1, 5.9, 0., 7., 1) == {2}
+    assert self.update(1, 10., 0., 7., 1) == {3}  # ratio 1.43, band 1, the floor 3
+    assert self.update(1, 12., 0., 7., 1) == {4}  # ratio 1.71, band 2 says 4, the floor 4
+    assert self.update(1, 12., 0., 7., 3) == {4}  # anchor 4 says 5, the floor 4
+    assert self.update(1, 10., 0., 7., 3) == {3}  # band 1 says 5, the floor 3
 
   def test_target_distance_jump(self):
     self.update(LeadDisplay.SHOW_FRAMES, 30., 29., 36.)
