@@ -316,8 +316,34 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
     self.update(LeadDisplay.HIDE_FRAMES, 0.)
     assert self.update(LeadDisplay.SHOW_FRAMES - 1, 6.6, 0.) == {0}
     assert self.update(1, 6.6, 0.) == {2}  # starts over from 2, a kept 5 would step down to 3
-    assert self.update(1, 8., 0.) == {5}
-    assert self.update(1, 6.6, float('nan')) == {5}  # a NaN speed holds the level
+    assert self.update(1, 8., 0.) == {2}  # the time gap alone says 5 here, as stock would show; the floors keep it close
+    assert self.update(1, 11., 0.) == {3}
+    assert self.update(1, 15., 0.) == {5}
+    assert self.update(1, 14.5, float('nan')) == {5}  # a NaN speed holds the level
+
+  def test_distance_floors(self):
+    # at a stop the time gap alone would put a car 8 m ahead at the farthest level; the floors keep it close
+    self.update(LeadDisplay.SHOW_FRAMES, 6., 0.)
+    for dist, obj_gap in [(8.9, 2), (9., 3), (11.9, 3), (12., 4), (14.9, 4), (15., 5), (14.1, 5), (13.9, 4), (11.1, 4), (10.9, 3), (8.1, 3), (7.9, 2)]:
+      assert self.update(1, dist, 0.) == {obj_gap}, dist
+    # the floors apply to the held distance, so a distance jump does not lift the cap before it is taken
+    self.update(1, 7.9, 0.)
+    assert self.update(LeadDisplay.SHOW_FRAMES - 1, 20., 0.) == {2}
+    assert self.update(1, 20., 0.) == {5}
+
+  def test_distance_floors_only_at_low_speed(self):
+    class NoFloors(LeadDisplay):
+      FLOORS = {3: 0., 4: 0., 5: 0.}
+
+    def levels(v_ego, display):
+      dists = [6. + 10. * abs(((i / 300.) % 2.) - 1.) for i in range(3000)]  # 16..6..16 m, a 6 s triangle
+      return [display.update(d, v_ego) for d in dists]
+
+    for v_ego in (6.1, 8., 12., 20., 30.):
+      assert levels(v_ego, LeadDisplay()) == levels(v_ego, NoFloors()), v_ego  # unchanged from 6.1 m/s up
+    assert levels(5.5, LeadDisplay()) != levels(5.5, NoFloors())  # under it level 5 arrives at 14.9 m, inside the floor
+    assert levels(3., LeadDisplay()) != levels(3., NoFloors())
+    assert max(levels(3., LeadDisplay())) == 5  # the floors cap, they do not hide a far lead
 
   def test_distance_jump(self):
     self.update(LeadDisplay.SHOW_FRAMES, 20.)

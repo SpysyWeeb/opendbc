@@ -138,6 +138,12 @@ class LeadDisplay:
   GAP_HYSTERESIS = 0.15  # s
   JUMP = 5.  # m
   JUMP_RATIO = 0.3
+  # Stock places a stopped car at the farthest level from about 7 m, and so does the time gap above. The owner would
+  # rather see a close car as close, so a level also needs the held distance to reach its floor: 9 m for level 3,
+  # 12 m for 4 and 15 m for 5, each kept until the distance is 1 m under its floor. From 6.1 m/s (22 km/h) up the
+  # time-gap thresholds are past the floors and the display is unchanged
+  FLOORS = {3: 9., 4: 12., 5: 15.}  # m, held distance at which each level can start
+  FLOOR_HYSTERESIS = 1.  # m
 
   def __init__(self):
     self.shown = False
@@ -145,6 +151,7 @@ class LeadDisplay:
     self.jump_frames = 0
     self.distance = 0.
     self.level = 2
+    self.cap = 2
 
   def update(self, lead_distance, v_ego):
     present = lead_distance > 0  # a NaN distance counts as no lead, a NaN speed holds the level
@@ -156,6 +163,7 @@ class LeadDisplay:
       self.distance = lead_distance
     if not self.shown:
       self.level = 2
+      self.cap = 2
       return 0
 
     if present:
@@ -170,7 +178,11 @@ class LeadDisplay:
       self.level += 1
     while self.level > 2 and gap < self.GAPS[self.level] - self.GAP_HYSTERESIS:
       self.level -= 1
-    return self.level
+    while self.cap < 5 and self.distance >= self.FLOORS[self.cap + 1]:
+      self.cap += 1
+    while self.cap > 2 and self.distance < self.FLOORS[self.cap] - self.FLOOR_HYSTERESIS:
+      self.cap -= 1
+    return min(self.level, self.cap)
 
 
 def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, obj_gap, set_speed, stopping, long_override, use_fca, CP):
