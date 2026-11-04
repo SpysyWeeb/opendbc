@@ -409,6 +409,7 @@ struct CarControl {
     leftLaneDepart @9: Bool;
     leadDistanceBars @10: Int8;  # 1-3: 1 is closest, 3 is farthest. some ports may utilize 2-4 bars instead
     leadDistance @11: Float32;  # m, distance to the lead car, 0 if there is none
+    leadTargetDistance @12: Float32;  # m, the following distance openpilot holds at this speed, 0 if unknown
 
     # not used with the dash, TODO: separate structs for dash UI and device UI
     audibleAlert @5: AudibleAlert;

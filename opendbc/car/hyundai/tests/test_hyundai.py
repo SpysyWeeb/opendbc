@@ -293,8 +293,10 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
   def setUp(self):
     self.lead_display = LeadDisplay()
 
-  def update(self, frames, dist, v_ego=20.):
-    return {self.lead_display.update(dist, v_ego) for _ in range(frames)}
+  def update(self, frames, dist, v_ego=20., target=None):
+    if target is None:
+      return {self.lead_display.update(dist, v_ego) for _ in range(frames)}
+    return {self.lead_display.update(dist, v_ego, target) for _ in range(frames)}
 
   def test_debounce(self):
     assert self.update(100, 45.) == {0}
@@ -352,3 +354,74 @@ class TestHyundaiLeadDisplay(unittest.TestCase):
     assert self.update(LeadDisplay.SHOW_FRAMES - 1, 45.) == {2}  # and the count restarts
     assert self.update(1, 45.) == {5}  # taken after 1.5 s, like a new lead
     assert self.update(1, 37.) == {4}  # a small step is taken at once
+
+  def test_target_ratio(self):
+    # aggressive at 29 m/s holds 36 m: levels start at 0.8, 1.1 and 1.5 of it, steps under 5 m dodge the jump guard
+    self.update(LeadDisplay.SHOW_FRAMES, 25., 29., 36.)
+    for dist, obj_gap in [(28.7, 2), (28.8, 3), (33., 3), (37., 3), (39.5, 3), (39.6, 4), (44., 4), (48., 4), (52., 4), (53.9, 4),
+                          (54., 5), (52.2, 5), (52.1, 4), (48., 4), (44., 4), (40., 4), (37.9, 4), (37.7, 3), (33., 3), (29., 3),
+                          (27., 3), (26.9, 2)]:
+      assert self.update(1, dist, 29., 36.) == {obj_gap}, dist
+    # 4 is kept to 37.8 m (1.05 x 36) in exact terms; 37.8 / 36 rounds to just under 1.05, so 37.9 and 37.7 bracket it
+
+  def test_target_ratio_relaxed(self):
+    # relaxed at 29 m/s holds 58 m, the same ratios apply; the exact boundaries are float ties, so each is bracketed by 0.1 m
+    self.update(LeadDisplay.SHOW_FRAMES, 40., 29., 58.)
+    for dist, obj_gap in [(46.3, 2), (46.5, 3), (52., 3), (58., 3), (63.7, 3), (63.9, 4), (69., 4), (74., 4), (79., 4), (84., 4),
+                          (86.9, 4), (87., 5), (84.1, 5), (84., 4), (79., 4), (74., 4), (69., 4), (64., 4), (61., 4), (60.8, 3),
+                          (56., 3), (51., 3), (46., 3), (43.5, 3), (43.4, 2)]:
+      assert self.update(1, dist, 29., 58.) == {obj_gap}, dist
+
+  def test_target_reads_gap_not_personality(self):
+    # at its own target each personality reads 3; the time gap alone reads aggressive's 36 m as 2 and relaxed's 58 m as 5
+    for target, time_gap_level in [(36., 2), (58., 5)]:
+      self.lead_display = LeadDisplay()
+      assert self.update(LeadDisplay.SHOW_FRAMES, target, 29., target) == {0, 3}, target
+      self.lead_display = LeadDisplay()
+      assert self.update(LeadDisplay.SHOW_FRAMES, target, 29.) == {0, time_gap_level}, target
+
+  def test_target_at_stop(self):
+    # an engaged stop sits about 5.9 m behind a 7 m target, ratio 0.84; the 9 m floor keeps it at 2
+    self.update(LeadDisplay.SHOW_FRAMES - 1, 5.9, 0., 7.)
+    assert self.update(1, 5.9, 0., 7.) == {2}
+    assert self.update(1, 10., 0., 7.) == {3}  # ratio 1.43 says 4, the floor 3
+    assert self.update(1, 12., 0., 7.) == {4}  # ratio 1.71 says 5, the floor 4
+
+  def test_target_nan_holds(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 45., 29., 36.)
+    assert self.update(1, 45., 29., 36.) == {4}  # 1.25
+    for dist in (41., 37., 33., 29.):  # the ratio would step to 3 by 29 m and the time gap to 2
+      assert self.update(1, dist, 29., float('nan')) == {4}, dist
+    for dist in (33., 37., 41.):  # an infinite target holds too, it would read every distance as 2
+      assert self.update(1, dist, 29., float('inf')) == {4}, dist
+    assert self.update(1, 41., 29., 36.) == {4}  # a target again is taken at once, 1.14
+    assert self.update(1, 37., 29., 36.) == {3}  # 1.03
+
+  def test_target_zero_is_time_gap(self):
+    dists = [6. + 60. * abs(((i / 300.) % 2.) - 1.) for i in range(3000)]  # 66..6..66 m, a 6 s triangle
+    for v_ego in (0., 3., 12., 29.):
+      no_target, zero, negative = LeadDisplay(), LeadDisplay(), LeadDisplay()
+      levels = [no_target.update(d, v_ego) for d in dists]
+      assert levels == [zero.update(d, v_ego, 0.) for d in dists], v_ego
+      assert levels == [negative.update(d, v_ego, -1.) for d in dists], v_ego
+
+  def test_target_mode_switch(self):
+    # the target may come and go between frames: one level is kept and each frame steps it by that frame's rule
+    self.update(LeadDisplay.SHOW_FRAMES, 40., 29., 36.)
+    for dist, target, obj_gap in [(40., 36., 4),  # 1.11
+                                  (40., 0., 3),  # 1.21 s
+                                  (40., 36., 4),
+                                  (36., 0., 3),  # 1.07 s
+                                  (36., 36., 3),  # 1.0
+                                  (32., 0., 2),  # 0.93 s
+                                  (32., 36., 3),  # 0.89
+                                  (28., 36., 3),  # 0.78, kept from 3
+                                  (28., 0., 2),  # 0.79 s
+                                  (28., 36., 2)]:  # 0.78, under 0.8 from 2
+      assert self.update(1, dist, 29., target) == {obj_gap}, (dist, target)
+
+  def test_target_distance_jump(self):
+    self.update(LeadDisplay.SHOW_FRAMES, 30., 29., 36.)
+    assert self.update(1, 30., 29., 36.) == {3}  # 0.83
+    assert self.update(LeadDisplay.SHOW_FRAMES - 1, 60., 29., 36.) == {3}  # twice the distance is a different object, the level holds
+    assert self.update(1, 60., 29., 36.) == {5}  # taken after 1.5 s, 1.67

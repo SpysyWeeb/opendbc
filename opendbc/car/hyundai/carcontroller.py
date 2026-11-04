@@ -90,7 +90,7 @@ class CarController(CarControllerBase):
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
     hud_control = CC.hudControl
-    obj_gap = self.lead_display.update(hud_control.leadDistance, CS.out.vEgo)
+    obj_gap = self.lead_display.update(hud_control.leadDistance, CS.out.vEgo, hud_control.leadTargetDistance)
 
     # steering torque
     new_torque = int(round(actuators.torque * self.params.STEER_MAX))
