@@ -11,4 +11,7 @@ SAFETY_UNUSED(safety_rx_hook);
 SAFETY_UNUSED(safety_tx_hook);
 SAFETY_UNUSED(safety_fwd_hook);
 SAFETY_UNUSED(safety_tick);
+SAFETY_UNUSED(safety_heartbeat);
+SAFETY_UNUSED(safety_heartbeat_check);
+SAFETY_UNUSED(safety_alternative_experience);
 SAFETY_UNUSED(set_safety_hooks);
