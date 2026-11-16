@@ -3,7 +3,9 @@
 #include "opendbc/safety/declarations.h"
 
 static uint8_t tesla_get_counter(const CANPacket_t *msg) {
-  uint8_t cnt = 0;
+  // default: 0x257, 0x118, 0x145, 0x286, 0x311
+  // Signal: DI_speedCounter, DI_systemStatusCounter, ESP_statusCounter, DI_locStatusCounter, UI_warningCounter
+  uint8_t cnt = msg->data[1] & 0x0FU;
   if (msg->addr == 0x2b9U) {
     // Signal: DAS_controlCounter
     cnt = msg->data[6] >> 5;
@@ -11,10 +13,6 @@ static uint8_t tesla_get_counter(const CANPacket_t *msg) {
   if (msg->addr == 0x488U) {
     // Signal: DAS_steeringControlCounter
     cnt = msg->data[2] & 0x0FU;
-  }
-  if ((msg->addr == 0x257U) || (msg->addr == 0x118U) || (msg->addr == 0x145U) || (msg->addr == 0x286U) || (msg->addr == 0x311U)) {
-    // Signal: DI_speedCounter, DI_systemStatusCounter, ESP_statusCounter, DI_locStatusCounter, UI_warningCounter
-    cnt = msg->data[1] & 0x0FU;
   }
   if (msg->addr == 0x155U) {
     // Signal: ESP_wheelRotationCounter
@@ -28,7 +26,9 @@ static uint8_t tesla_get_counter(const CANPacket_t *msg) {
 }
 
 static int _tesla_get_checksum_byte(const int addr) {
-  int checksum_byte = -1;
+  // default: 0x257, 0x118, 0x145, 0x286, 0x311
+  // Signal: DI_speedChecksum, DI_systemStatusChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
+  int checksum_byte = 0;
   if ((addr == 0x370) || (addr == 0x2b9) || (addr == 0x155)) {
     // Signal: EPAS3S_sysStatusChecksum, DAS_controlChecksum, ESP_wheelRotationChecksum
     checksum_byte = 7;
@@ -37,33 +37,20 @@ static int _tesla_get_checksum_byte(const int addr) {
     // Signal: DAS_steeringControlChecksum
     checksum_byte = 3;
   }
-  if ((addr == 0x257) || (addr == 0x118) || (addr == 0x145) || (addr == 0x286) || (addr == 0x311)) {
-    // Signal: DI_speedChecksum, DI_systemStatusChecksum, ESP_statusChecksum, DI_locStatusChecksum, UI_warningChecksum
-    checksum_byte = 0;
-  }
   return checksum_byte;
 }
 
 static uint32_t tesla_get_checksum(const CANPacket_t *msg) {
-  uint8_t chksum = 0;
-  int checksum_byte = _tesla_get_checksum_byte(msg->addr);
-  if (checksum_byte != -1) {
-    chksum = msg->data[checksum_byte];
-  }
-  return chksum;
+  return msg->data[_tesla_get_checksum_byte(msg->addr)];
 }
 
 static uint32_t tesla_compute_checksum(const CANPacket_t *msg) {
-  uint8_t chksum = 0;
   int checksum_byte = _tesla_get_checksum_byte(msg->addr);
-
-  if (checksum_byte != -1) {
-    chksum = (uint8_t)((msg->addr & 0xFFU) + ((msg->addr >> 8) & 0xFFU));
-    int len = GET_LEN(msg);
-    for (int i = 0; i < len; i++) {
-      if (i != checksum_byte) {
-        chksum += msg->data[i];
-      }
+  uint8_t chksum = (uint8_t)((msg->addr & 0xFFU) + ((msg->addr >> 8) & 0xFFU));
+  int len = GET_LEN(msg);
+  for (int i = 0; i < len; i++) {
+    if (i != checksum_byte) {
+      chksum += msg->data[i];
     }
   }
   return chksum;
@@ -79,6 +66,17 @@ static bool tesla_get_quality_flag_valid(const CANPacket_t *msg) {
     valid = (user_brake_status != 0) && (user_brake_status != 3);  // ESP_driverBrakeApply=NotInit_orOff, Faulty_SNA
   }
   return valid;
+}
+
+// latch a stock feature on its rising edge, unless it starts while engaged
+static void tesla_latch_rising_edge(bool now, bool *prev, bool *latched, bool engaged) {
+  if (now && !*prev && !engaged) {
+    *latched = true;
+  }
+  if (!now) {
+    *latched = false;
+  }
+  *prev = now;
 }
 
 static void tesla_rx_hook(const CANPacket_t *msg) {
@@ -128,14 +126,7 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
                               (autopark_state == 4) ||  // COMPLETE
                               (autopark_state == 9);    // SELFPARK_STARTED
 
-    // Only consider rising edges while controls are not allowed
-    if (tesla_autopark_now && !safety.tesla_autopark_prev && !safety.cruise_engaged_prev) {
-      safety.tesla_autopark = true;
-    }
-    if (!tesla_autopark_now) {
-      safety.tesla_autopark = false;
-    }
-    safety.tesla_autopark_prev = tesla_autopark_now;
+    tesla_latch_rising_edge(tesla_autopark_now, &safety.tesla_autopark_prev, &safety.tesla_autopark, safety.cruise_engaged_prev);
 
     // Cruise state
     int cruise_state = (msg->data[1] >> 4) & 0x07U;
@@ -164,14 +155,7 @@ static void tesla_rx_hook(const CANPacket_t *msg) {
     int steering_control_type = msg->data[2] >> 5;  // DAS_steeringControlType
     bool tesla_stock_lkas_now = steering_control_type == 2;  // "LANE_KEEP_ASSIST"
 
-    // Only consider rising edges while controls are not allowed
-    if (tesla_stock_lkas_now && !safety.tesla_stock_lkas_prev && !safety.controls_allowed) {
-      safety.tesla_stock_lkas = true;
-    }
-    if (!tesla_stock_lkas_now) {
-      safety.tesla_stock_lkas = false;
-    }
-    safety.tesla_stock_lkas_prev = tesla_stock_lkas_now;
+    tesla_latch_rising_edge(tesla_stock_lkas_now, &safety.tesla_stock_lkas_prev, &safety.tesla_stock_lkas, safety.controls_allowed);
   }
 }
 
