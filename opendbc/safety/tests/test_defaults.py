@@ -3,7 +3,8 @@ import unittest
 
 import opendbc.safety.tests.common as common
 from opendbc.car.structs import CarParams
-from opendbc.safety.tests.libsafety.libsafety_py import ffi, libsafety
+from opendbc.safety.tests.libsafety import libsafety_py
+from opendbc.safety.tests.libsafety.libsafety_py import ffi
 
 
 class TestDefaultRxHookBase(common.SafetyTest):
@@ -145,6 +146,37 @@ class TestHeartbeat(common.SafetyTestBase):
       self.assertEqual(0, self.safety.safety_a.state.heartbeat_engaged_mismatches)
 
 
+class TestIgnitionCan(common.SafetyTestBase):
+  SAFETY_MODEL = None
+  # (bus, addr, len, counter byte, counter shift, ignition on data) of each ignition message with a counter
+  MSGS = ((0, 0x152, 8, 1, 0, {7: 0x10}), (0, 0x221, 8, 6, 4, {0: 0x60}), (0, 0x3C0, 4, 1, 0, {2: 0x02}),
+          (0, 0x432, 8, 1, 0, {6: 0x01}), (2, 0x432, 8, 1, 0, {6: 0x01}))
+
+  def _send(self, msg, counter):
+    bus, addr, length, counter_byte, shift, ign_data = msg
+    dat = bytearray(length)
+    dat[counter_byte] = counter << shift
+    for i, v in ign_data.items():
+      dat[i] = v
+    self.safety.ignition_can_hook(common.make_msg(bus, addr, dat=bytes(dat)))
+    return self.safety.get_ignition_can()
+
+  def test_counter_skipped(self):
+    # ignition is only read from a message whose counter follows the previous one
+    for msg in self.MSGS:
+      self.safety.init_tests()
+      for counter, ignition in ((0, False), (2, False), (3, True)):
+        self.assertEqual(ignition, self._send(msg, counter), (msg[:2], counter))
+
+  def test_init_resets_counters(self):
+    # init_tests forgets the previous counters, so no test sees a counter left over from another one
+    for msg in self.MSGS:
+      self.safety.init_tests()
+      self._send(msg, 0)
+      self.safety.init_tests()
+      self.assertFalse(self._send(msg, 1), msg[:2])
+
+
 class TestModeCount(common.SafetyTestBase):
   SAFETY_MODEL = CarParams.SafetyModel.toyota
   SAFETY_PARAM = 73
@@ -164,6 +196,7 @@ class TestSafetyConfigs(unittest.TestCase):
   def test_hooks(self):
     # safety.h relies on these instead of checking them at runtime
     always_tx = (CarParams.SafetyModel.allOutput, CarParams.SafetyModel.elm327)  # tx_hook_copy whitelists everything
+    libsafety = libsafety_py.libsafety  # loaded when the test runs, so a test runner can load its own build first
     for mode in CarParams.SafetyModel.schema.enumerants.values():
       if libsafety.set_safety_hooks(mode, 0) != 0:
         continue

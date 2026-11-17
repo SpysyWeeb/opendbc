@@ -1,38 +1,44 @@
-#pragma once
+#ifndef SAFETY_HELPERS_H
+#define SAFETY_HELPERS_H
 
 #include "opendbc/safety/declarations.h"
 
-// cppcheck-suppress-macro misra-c2012-1.2; allow __typeof__ extension
-// cppcheck-suppress-macro misra-c2012-17.3; suppress false implicit declaration alert on typeof extension
-#define SAFETY_MIN(a, b) ({ \
-  __typeof__(a) _a = (a); \
-  __typeof__(b) _b = (b); \
-  (_a < _b) ? _a : _b; \
-})
+static uint32_t GET_BYTES_LE(const CANPacket_t *msg, int start, int len);
+static uint32_t GET_BYTES_BE(const CANPacket_t *msg, int start, int len);
+static uint64_t GET_BYTES_64_LE(const CANPacket_t *msg, int start, int len);
+static int to_signed(uint32_t d, int bits);
+static int sign_magnitude(uint32_t magnitude, bool negative);
+static int from_offset(uint32_t raw, int offset);
+static void update_sample(struct sample_t *sample, int sample_new);
+static int ROUND(float val);
+static void pcm_cruise_check(bool cruise_engaged);
+static void speed_mismatch_check(const float speed_2);
 
-// cppcheck-suppress-macro misra-c2012-1.2; allow __typeof__ extension
-// cppcheck-suppress-macro misra-c2012-17.3; suppress false implicit declaration alert on typeof extension
-#define SAFETY_MAX(a, b) ({ \
-  __typeof__(a) _a = (a); \
-  __typeof__(b) _b = (b); \
-  (_a > _b) ? _a : _b; \
-})
+static inline int safety_min_int(int a, int b) {
+  return (a < b) ? a : b;
+}
 
-// cppcheck-suppress-macro misra-c2012-1.2; allow __typeof__ extension
-// cppcheck-suppress-macro misra-c2012-17.3; suppress false implicit declaration alert on typeof extension
-#define SAFETY_CLAMP(x, low, high) ({ \
-  __typeof__(x) __x = (x); \
-  __typeof__(low) __low = (low);\
-  __typeof__(high) __high = (high);\
-  (__x > __high) ? __high : ((__x < __low) ? __low : __x); \
-})
+static inline uint8_t safety_min_uint8(uint8_t a, uint8_t b) {
+  return (a < b) ? a : b;
+}
 
-// cppcheck-suppress-macro misra-c2012-1.2; allow __typeof__ extension
-// cppcheck-suppress-macro misra-c2012-17.3; suppress false implicit declaration alert on typeof extension
-#define SAFETY_ABS(a) ({ \
-  __typeof__(a) _a = (a); \
-  (_a > 0) ? _a : (-_a); \
-})
+static inline int safety_max_int(int a, int b) {
+  return (a > b) ? a : b;
+}
+
+static inline float safety_max_float(float a, float b) {
+  return (a > b) ? a : b;
+}
+
+static inline int safety_clamp_int(int x, int low, int high) {
+  return (x > high) ? high : ((x < low) ? low : x);
+}
+
+static inline int safety_abs_int(int a) {
+  return (a > 0) ? a : (-a);
+}
+
+#define SAFETY_ARRAY_LEN(a) ((int)sizeof(a) / (int)sizeof((a)[0]))
 
 #define SAFETY_UNUSED(x) ((void)(x))
 
@@ -63,8 +69,9 @@ static bool msg_matches_addr_bus_len(const CANPacket_t *msg, uint32_t addr, uint
   return actual == expected;
 }
 
-#define MSG_MATCHES_SELECT(_msg, _addr, _bus, _len, NAME, ...) NAME
-#define msg_matches(...) MSG_MATCHES_SELECT(__VA_ARGS__, msg_matches_addr_bus_len, msg_matches_addr_bus)(__VA_ARGS__)
+// the trailing 0 keeps the "..." of MSG_MATCHES_SELECT non-empty, as ISO C11 requires
+#define MSG_MATCHES_SELECT(_msg, _addr, _bus, _len, NAME, ...) (NAME)
+#define msg_matches(...) MSG_MATCHES_SELECT(__VA_ARGS__, msg_matches_addr_bus_len, msg_matches_addr_bus, 0)(__VA_ARGS__)
 
 // compute the time elapsed (in microseconds) from 2 counter samples
 // case where ts < ts_last is ok: overflow is properly re-casted into uint32_t
@@ -76,9 +83,19 @@ static bool safety_max_limit_check(int val, const int MAX_VAL, const int MIN_VAL
   return (val > MAX_VAL) || (val < MIN_VAL);
 }
 
+static float vehicle_speed_ms(int raw) {
+  return (float)raw / VEHICLE_SPEED_FACTOR;
+}
+
+// convert a limit to CAN units and add a margin, truncating toward zero
+static int limit_to_can(const float limit, const float to_can, const float margin) {
+  const float limit_can = (limit * to_can) + margin;
+  return (int)limit_can;
+}
+
 // interp function that holds extreme values
 static float safety_interpolate(struct lookup_t xy, float x) {
-  int size = sizeof(xy.x) / sizeof(xy.x[0]);
+  int size = SAFETY_ARRAY_LEN(xy.x);
   float ret = xy.y[size - 1];  // default output is last point
 
   // x is lower than the first point in the x array. Return the first point
@@ -103,3 +120,5 @@ static float safety_interpolate(struct lookup_t xy, float x) {
   }
   return ret;
 }
+
+#endif  // SAFETY_HELPERS_H

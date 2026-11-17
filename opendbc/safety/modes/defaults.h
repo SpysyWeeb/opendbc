@@ -1,4 +1,7 @@
-#pragma once
+#ifndef SAFETY_MODES_DEFAULTS_H
+#define SAFETY_MODES_DEFAULTS_H
+
+#include <stddef.h>
 
 #include "opendbc/safety/declarations.h"
 
@@ -9,7 +12,7 @@ static safety_config nooutput_init(uint16_t param) {
 }
 
 // no RX checks or TX msgs, so the RX and TX hooks are never called
-const safety_hooks nooutput_hooks = {
+static const safety_hooks nooutput_hooks = {
   .init = nooutput_init,
 };
 
@@ -32,3 +35,5 @@ const safety_hooks alloutput_hooks = {
   .init = alloutput_init,
   .tx = alloutput_tx_hook,
 };
+
+#endif  // SAFETY_MODES_DEFAULTS_H

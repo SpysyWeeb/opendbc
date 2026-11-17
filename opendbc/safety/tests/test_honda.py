@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import unittest
 import numpy as np
+from collections.abc import Callable
 
 from opendbc.car.honda.values import HondaSafetyFlags
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -29,6 +30,8 @@ class Btn:
 
 
 class HondaButtonEnableBase(common.CarSafetyTest):
+  _acc_state_msg: Callable[..., libsafety_py.CANPacket]
+  _button_msg: Callable[..., libsafety_py.CANPacket]
 
   # override these inherited tests since we're using button enable
   def test_disable_control_allowed_from_cruise(self):
@@ -135,6 +138,8 @@ class HondaButtonEnableBase(common.CarSafetyTest):
 
 
 class HondaPcmEnableBase(common.CarSafetyTest):
+  _acc_state_msg: Callable[..., libsafety_py.CANPacket]
+  _button_msg: Callable[..., libsafety_py.CANPacket]
 
   def test_buttons(self):
     """
@@ -163,9 +168,9 @@ class HondaPcmEnableBase(common.CarSafetyTest):
 
 class HondaBase(common.CarSafetyTest):
   MAX_BRAKE = 255
-  PT_BUS: int | None = None  # must be set when inherited
-  STEER_BUS: int | None = None  # must be set when inherited
-  BUTTONS_BUS: int | None = None  # must be set when inherited, tx on this bus, rx on PT_BUS
+  PT_BUS: int  # must be set when inherited
+  STEER_BUS: int  # must be set when inherited
+  BUTTONS_BUS: int  # must be set when inherited, tx on this bus, rx on PT_BUS
 
   RELAY_MALFUNCTION_ADDRS = {0: (0xE4, 0x194)}  # STEERING_CONTROL
 
@@ -226,6 +231,18 @@ class HondaBase(common.CarSafetyTest):
       self.safety.set_controls_allowed(controls_allowed)
       self.assertTrue(self._tx(self._send_steer_msg(0x0000)))
       self.assertEqual(controls_allowed, self._tx(self._send_steer_msg(0x1000)))
+      self.assertEqual(controls_allowed, self._tx(self._send_steer_msg(1)))
+
+  def test_vehicle_moving(self):
+    # XMISSION_SPEED is 0.01 kph per bit: 0.01 sets only the low byte, 2.56 only the high byte
+    for speed in (0.01, 2.56):
+      # a brake press that was already pressed only disengages while moving
+      self._rx(self._speed_msg(0))
+      self._rx(self._user_brake_msg(1))
+      self.safety.set_controls_allowed(1)
+      self._rx(self._speed_msg(speed))
+      self._rx(self._user_brake_msg(1))
+      self.assertFalse(self.safety.get_controls_allowed())
 
 
 # ********************* Honda Nidec **********************
