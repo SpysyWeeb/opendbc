@@ -35,6 +35,10 @@
 #include "opendbc/safety/modes/byd.h"
 #include "opendbc/safety/modes/hyundai_canfd.h"
 
+static bool GET_BIT(const CANPacket_t *msg, uint32_t b) {
+  return ((msg->data[b / 8U] >> (b % 8U)) & 0x1U) != 0U;
+}
+
 static uint32_t GET_BYTES_LE(const CANPacket_t *msg, int start, int len) {
   uint32_t ret = 0U;
   for (int i = 0; i < len; i++) {
@@ -526,8 +530,8 @@ static void speed_mismatch_check(const float speed_2) {
   // For safety modes that use speed to adjust torque or angle limits
   // compared in vehicle_speed's integer units, so the limit is exact
   const int MAX_SPEED_DELTA = 2 * (int)VEHICLE_SPEED_FACTOR;  // 2 m/s
-  bool is_invalid_speed = safety_abs_int(ROUND(speed_2 * VEHICLE_SPEED_FACTOR) - safety.vehicle_speed.values[0]) > MAX_SPEED_DELTA;
-  if (is_invalid_speed) {
+  const int speed_delta = ROUND(speed_2 * VEHICLE_SPEED_FACTOR) - safety.vehicle_speed.values[0];
+  if (safety_max_limit_check(speed_delta, MAX_SPEED_DELTA, -MAX_SPEED_DELTA)) {
     safety.controls_allowed = false;
   }
 }

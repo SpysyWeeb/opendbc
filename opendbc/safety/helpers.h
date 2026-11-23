@@ -3,6 +3,7 @@
 
 #include "opendbc/safety/declarations.h"
 
+static bool GET_BIT(const CANPacket_t *msg, uint32_t b);
 static uint32_t GET_BYTES_LE(const CANPacket_t *msg, int start, int len);
 static uint32_t GET_BYTES_BE(const CANPacket_t *msg, int start, int len);
 static uint64_t GET_BYTES_64_LE(const CANPacket_t *msg, int start, int len);
@@ -32,10 +33,6 @@ static inline float safety_max_float(float a, float b) {
 
 static inline int safety_clamp_int(int x, int low, int high) {
   return (x > high) ? high : ((x < low) ? low : x);
-}
-
-static inline int safety_abs_int(int a) {
-  return (a > 0) ? a : (-a);
 }
 
 #define SAFETY_ARRAY_LEN(a) ((int)sizeof(a) / (int)sizeof((a)[0]))
